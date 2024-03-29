@@ -1,0 +1,3 @@
+C# API Client Generator
+
+npx @openapitools/openapi-generator-cli generate -i openapi.json -g csharp -c ./openapi-generator.yaml -o ./ --skip-validate-spec

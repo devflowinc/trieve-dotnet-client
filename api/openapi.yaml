@@ -1,0 +1,5737 @@
+openapi: 3.0.3
+info:
+  contact:
+    email: developers@trieve.ai
+    name: Trieve Team
+    url: https://trieve.ai
+  description: Trieve OpenAPI Specification. This document describes all of the operations
+    available through the Trieve API.
+  license:
+    name: BSL
+    url: https://github.com/devflowinc/trieve/blob/main/LICENSE.txt
+  title: Trieve API
+  version: 0.5.0
+servers:
+- description: Local development server
+  url: http://localhost:8090
+- description: Production server
+  url: https://api.trieve.ai
+tags:
+- description: Invitation endpoint. Exists to invite users to an organization.
+  name: invitation
+- description: Authentication endpoint. Serves to register and authenticate users.
+  name: auth
+- description: User endpoint. Enables you to modify user roles and information.
+  name: user
+- description: Organization endpoint. Enables you to modify organization roles and
+    information.
+  name: organization
+- description: Dataset endpoint. Datasets belong to organizations and hold configuration
+    information for both client and server. Datasets contain chunks and chunk groups.
+  name: dataset
+- description: Chunk endpoint. Think of chunks as individual searchable units of information.
+    The majority of your integration will likely be with the Chunk endpoint.
+  name: chunk
+- description: Chunk groups endpoint. Think of a chunk_group as a bookmark folder
+    within the dataset.
+  name: chunk_group
+- description: "File endpoint. When files are uploaded, they are stored in S3 and\
+    \ broken up into chunks with text extraction from Apache Tika. You can upload\
+    \ files of pretty much any type up to 1GB in size. See chunking algorithm details\
+    \ at `docs.trieve.ai` for more information on how chunking works. Improved default\
+    \ chunking is on our roadmap."
+  name: file
+- description: "Notifications endpoint. Files are uploaded asynchronously and events\
+    \ are sent to the user when the upload is complete. Soon, chunk creation will\
+    \ work in the same way."
+  name: events
+- description: Topic chat endpoint. Think of topics as the storage system for gen-ai
+    chat memory. Gen AI messages belong to topics.
+  name: topic
+- description: "Message chat endpoint. Messages are units belonging to a topic in\
+    \ the context of a chat with a LLM. There are system, user, and assistant messages."
+  name: message
+- description: Stripe endpoint. Used for the managed SaaS version of this app. Eventually
+    this will become a micro-service. Reach out to the team using contact info found
+    at `docs.trieve.ai` for more information.
+  name: stripe
+- description: Health check endpoint. Used to check if the server is up and running.
+  name: health
+paths:
+  /api/auth:
+    delete:
+      description: |-
+        Logout
+
+        Invalidate your current auth credential stored typically stored in a cookie. This does not invalidate your API key.
+      operationId: logout
+      responses:
+        "204":
+          description: Confirmation that your current auth token has been invalidated.
+            This does not invalidate your API key.
+      summary: Logout
+      tags:
+      - auth
+    get:
+      description: |-
+        Login
+
+        This will redirect you to the OAuth provider for authentication with email/pass, SSO, Google, Github, etc.
+      operationId: login
+      parameters:
+      - description: Query parameters for login to be included as kv pairs after ?
+          on the request URL.
+        explode: true
+        in: query
+        name: content
+        required: true
+        schema:
+          $ref: '#/components/schemas/AuthQuery'
+        style: form
+      responses:
+        "303":
+          description: Response that redirects to OAuth provider through a Location
+            header to be handled by browser.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: OAuth error likely with OIDC provider.
+      summary: Login
+      tags:
+      - auth
+  /api/auth/callback:
+    get:
+      description: |-
+        OpenID Connect callback
+
+        This is the callback route for the OAuth provider, it should not be called directly. Redirects to browser with set-cookie header.
+      operationId: callback
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlimUser'
+          description: Response that returns with set-cookie header
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Email or password empty or incorrect
+      summary: OpenID Connect callback
+      tags:
+      - auth
+  /api/auth/me:
+    get:
+      description: |-
+        Get Me
+
+        Get the user corresponding to your current auth credentials.
+      operationId: get_me
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlimUser'
+          description: The user corresponding to your current auth credentials
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Error message indicitating you are not currently signed in
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Me
+      tags:
+      - auth
+  /api/chunk:
+    post:
+      description: |-
+        Create or Upsert Chunk or Chunks
+
+        Create a new chunk. If the chunk has the same tracking_id as an existing chunk, the request will fail. Once a chunk is created, it can be searched for using the search endpoint.
+      operationId: create_chunk
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChunkData'
+        description: JSON request payload to create a new chunk (chunk)
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnQueuedChunk'
+          description: JSON response payload containing the created chunk
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Error typically due to deserialization issues
+        "426":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Error when upgrade is needed to process more chunks
+      security:
+      - ApiKey:
+        - admin
+      summary: Create or Upsert Chunk or Chunks
+      tags:
+      - chunk
+    put:
+      description: |-
+        Update Chunk
+
+        Update a chunk. If you try to change the tracking_id of the chunk to have the same tracking_id as an existing chunk, the request will fail.
+      operationId: update_chunk
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChunkData'
+        description: JSON request payload to update a chunk (chunk)
+        required: true
+      responses:
+        "204":
+          description: No content Ok response indicating the chunk was updated as
+            requested
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: "Service error relating to to updating chunk, likely due to\
+            \ conflicting tracking_id"
+      security:
+      - ApiKey:
+        - admin
+      summary: Update Chunk
+      tags:
+      - chunk
+  /api/chunk/gen_suggestions:
+    post:
+      description: |-
+        Generate suggested queries
+
+        This endpoint will generate 3 suggested queries based off the query provided in the request body and return them as a JSON object.
+      operationId: create_suggested_queries_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedQueriesRequest'
+        description: JSON request payload to get alternative suggested queries
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedQueriesResponse'
+          description: A JSON object containing a list of alternative suggested queries
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: "Service error relating to to updating chunk, likely due to\
+            \ conflicting tracking_id"
+      security:
+      - ApiKey:
+        - readonly
+      summary: Generate suggested queries
+      tags:
+      - chunk
+  /api/chunk/generate:
+    post:
+      description: |-
+        RAG on Specified Chunks
+
+        This endpoint exists as an alternative to the topic+message concept where our API handles chat memory. With this endpoint, the user is responsible for providing the context window and the prompt. See more in the "search before generate" page at docs.trieve.ai.
+      operationId: generate_off_chunks
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateChunksRequest'
+        description: JSON request payload to perform RAG on some chunks (chunks)
+        required: true
+      responses:
+        "200":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: This will be a JSON response of a string containing the LLM's
+            generated inference. Response if not streaming.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: "Service error relating to to updating chunk, likely due to\
+            \ conflicting tracking_id"
+      security:
+      - ApiKey:
+        - readonly
+      summary: RAG on Specified Chunks
+      tags:
+      - chunk
+  /api/chunk/recommend:
+    post:
+      description: |-
+        Get Recommended Chunks
+
+        Get recommendations of chunks similar to the chunks in the request. Think about this as a feature similar to the "add to playlist" recommendation feature on Spotify. This request pairs especially well with our groups endpoint.
+      operationId: get_recommended_chunks
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendChunksRequest'
+        description: JSON request payload to get recommendations of chunks similar
+          to the chunks in the request
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ChunkMetadataWithFileData'
+                type: array
+          description: JSON response payload containing chunks with scores which are
+            similar to those in the request body
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to to getting similar chunks
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Recommended Chunks
+      tags:
+      - chunk
+  /api/chunk/search:
+    post:
+      description: |-
+        Search
+
+        This route provides the primary search functionality for the API. It can be used to search for chunks by semantic similarity, full-text similarity, or a combination of both. Results' `chunk_html` values will be modified with `<b>` tags for sub-sentence highlighting.
+      operationId: search_chunk
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchChunkData'
+        description: JSON request payload to semantically search for chunks (chunks)
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchChunkQueryResponseBody'
+          description: chunks which are similar to the embedding vector of the search
+            query
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to searching
+      security:
+      - ApiKey:
+        - readonly
+      summary: Search
+      tags:
+      - chunk
+  /api/chunk/tracking_id/update:
+    put:
+      description: |-
+        Update Chunk By Tracking Id
+
+        Update a chunk by tracking_id. This is useful for when you are coordinating with an external system and want to use the tracking_id to identify the chunk.
+      operationId: update_chunk_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChunkByTrackingIdData'
+        description: JSON request payload to update a chunk by tracking_id (chunks)
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the chunk has been updated as per your request
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to to updating chunk
+      security:
+      - ApiKey:
+        - admin
+      summary: Update Chunk By Tracking Id
+      tags:
+      - chunk
+  /api/chunk/tracking_id/{tracking_id}:
+    delete:
+      description: |-
+        Delete Chunk By Tracking Id
+
+        Delete a chunk by tracking_id. This is useful for when you are coordinating with an external system and want to use the tracking_id to identify the chunk. If deleting a root chunk which has a collision, the most recently created collision will become a new root chunk.
+      operationId: delete_chunk_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: tracking_id of the chunk you want to delete
+        explode: false
+        in: path
+        name: tracking_id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "204":
+          description: Confirmation that the chunk with the tracking_id specified
+            was deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding a chunk by tracking_id
+      security:
+      - ApiKey:
+        - admin
+      summary: Delete Chunk By Tracking Id
+      tags:
+      - chunk
+    get:
+      description: |-
+        Get Chunk By Tracking Id
+
+        Get a singular chunk by tracking_id. This is useful for when you are coordinating with an external system and want to use your own id as the primary reference for a chunk.
+      operationId: get_chunk_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: tracking_id of the chunk you want to fetch
+        explode: false
+        in: path
+        name: tracking_id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkMetadata'
+          description: chunk with the tracking_id that you were searching for
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to fidning a chunk by tracking_id
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Chunk By Tracking Id
+      tags:
+      - chunk
+  /api/chunk/{chunk_id}:
+    delete:
+      description: |-
+        Delete Chunk
+
+        Delete a chunk by its id. If deleting a root chunk which has a collision, the most recently created collision will become a new root chunk.
+      operationId: delete_chunk
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the chunk you want to fetch.
+        explode: false
+        in: path
+        name: chunk_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "204":
+          description: Confirmation that the chunk with the id specified was deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding a chunk by tracking_id
+      security:
+      - ApiKey:
+        - admin
+      summary: Delete Chunk
+      tags:
+      - chunk
+    get:
+      description: |-
+        Get Chunk By Id
+
+        Get a singular chunk by id.
+      operationId: get_chunk_by_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the chunk you want to fetch.
+        explode: false
+        in: path
+        name: chunk_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkMetadata'
+          description: chunk with the id that you were searching for
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to fidning a chunk by tracking_id
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Chunk By Id
+      tags:
+      - chunk
+  /api/chunk_group:
+    post:
+      description: |-
+        Create Chunk Group
+
+        Create a new chunk_group. This is a way to group chunks together. If you try to create a chunk_group with the same tracking_id as an existing chunk_group, this operation will fail.
+      operationId: create_chunk_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChunkGroupData'
+        description: JSON request payload to cretea a chunkGroup
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkGroup'
+          description: Returns the created chunkGroup
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating the chunkGroup
+      security:
+      - ApiKey:
+        - admin
+      summary: Create Chunk Group
+      tags:
+      - chunk_group
+    put:
+      description: |-
+        Update Group
+
+        Update a chunk_group. If you try to change the tracking_id to one that already exists, this operation will fail.
+      operationId: update_chunk_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChunkGroupData'
+        description: JSON request payload to update a chunkGroup
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the chunkGroup was updated
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to updating the chunkGroup
+      security:
+      - ApiKey:
+        - admin
+      summary: Update Group
+      tags:
+      - chunk_group
+  /api/chunk_group/chunk/{group_id}:
+    delete:
+      description: |-
+        Remove Chunk from Group
+
+        Route to remove a chunk from a group.
+      operationId: remove_chunk_from_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the group to remove the bookmark'ed chunk from
+        explode: false
+        in: path
+        name: group_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChunkGroupData'
+        description: JSON request payload to cretea a chunkGroup
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the chunk was removed to the group
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to removing the chunk from the group
+      security:
+      - ApiKey:
+        - admin
+      summary: Remove Chunk from Group
+      tags:
+      - chunk_group
+    post:
+      description: |-
+        Add Chunk to Group
+
+        Route to add a chunk to a group.
+      operationId: add_chunk_to_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the group to add the chunk to as a bookmark
+        explode: false
+        in: path
+        name: group_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddChunkToGroupData'
+        description: JSON request payload to add a chunk to a group (bookmark it)
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the chunk was added to the group (bookmark'ed).
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in.
+      security:
+      - ApiKey:
+        - admin
+      summary: Add Chunk to Group
+      tags:
+      - chunk_group
+  /api/chunk_group/chunks:
+    post:
+      description: |-
+        Get Groups for Chunks
+
+        Route to get the groups that a chunk is in.
+      operationId: get_groups_chunk_is_in
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetGroupsForChunksData'
+        description: JSON request payload to get the groups that a chunk is in
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/BookmarkGroupResult'
+                type: array
+          description: JSON body representing the groups that the chunk is in
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Groups for Chunks
+      tags:
+      - chunk_group
+  /api/chunk_group/group_oriented_search:
+    post:
+      description: |-
+        Search Over Groups
+
+        This route allows you to get groups as results instead of chunks. Each group returned will have the matching chunks sorted by similarity within the group. This is useful for when you want to get groups of chunks which are similar to the search query. If choosing hybrid search, the results will be re-ranked using BAAI/bge-reranker-large. Compatible with semantic, fulltext, or hybrid search modes.
+      operationId: search_over_groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchOverGroupsData'
+        description: JSON request payload to semantically search over groups
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchOverGroupsResponseBody'
+          description: Group chunks which are similar to the embedding vector of the
+            search query
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in
+      summary: Search Over Groups
+      tags:
+      - chunk_group
+  /api/chunk_group/recommend:
+    post:
+      description: |-
+        Get Recommended Groups
+
+        Route to get recommended groups. This route will return groups which are similar to the groups in the request body.
+      operationId: get_recommended_groups
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReccomendGroupChunksRequest'
+        description: JSON request payload to get recommendations of chunks similar
+          to the chunks in the request
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/GroupScoreChunkDTO'
+                type: array
+          description: JSON response payload containing chunks with scores which are
+            similar to those in the request body
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to to getting similar chunks
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Recommended Groups
+      tags:
+      - chunk_group
+  /api/chunk_group/search:
+    post:
+      description: |-
+        Search Within Group
+
+        This route allows you to search only within a group. This is useful for when you only want search results to contain chunks which are members of a specific group. If choosing hybrid search, the results will be re-ranked using BAAI/bge-reranker-large.
+      operationId: search_within_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchWithinGroupData'
+        description: JSON request payload to semantically search a group
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchGroupsResult'
+          description: Group chunks which are similar to the embedding vector of the
+            search query
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in
+      security:
+      - ApiKey:
+        - readonly
+      summary: Search Within Group
+      tags:
+      - chunk_group
+  /api/chunk_group/tracking_id/{group_tracking_id}/{page}:
+    get:
+      description: |-
+        Get Chunks in Group by Tracking ID
+
+        Route to get all chunks for a group. The response is paginated, with each page containing 10 chunks. Support for custom page size is coming soon.
+      operationId: get_chunks_in_group_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the group to get the chunks from
+        explode: false
+        in: path
+        name: group_tracking_id
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The page of chunks to get from the group
+        explode: false
+        in: path
+        name: page
+        required: true
+        schema:
+          format: int64
+          minimum: 0
+          type: integer
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookmarkData'
+          description: Chunks present within the specified group
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Chunks in Group by Tracking ID
+      tags:
+      - chunk_group
+  /api/chunk_group/tracking_id/{tracking_id}:
+    delete:
+      description: |-
+        Delete Group by Tracking ID
+
+        Delete a chunk_group with the given tracking id.
+      operationId: delete_group_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Tracking id of the chunk_group to delete
+        explode: false
+        in: path
+        name: tracking_id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "204":
+          description: Confirmation that the chunkGroup was deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to deleting the chunkGroup
+      security:
+      - ApiKey:
+        - admin
+      summary: Delete Group by Tracking ID
+      tags:
+      - chunk_group
+    get:
+      description: |-
+        Get Group by Tracking ID
+
+        Fetch the group with the given tracking id.
+        get_group_by_tracking_id
+      operationId: get_group_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The tracking id of the group to fetch.
+        explode: false
+        in: path
+        name: tracking_id
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkGroup'
+          description: JSON body representing the group with the given tracking id
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the group with the given
+            tracking id
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Group by Tracking ID
+      tags:
+      - chunk_group
+    post:
+      description: |-
+        Add Chunk to Group by Tracking ID
+
+        Route to add a chunk to a group by tracking id.
+      operationId: add_chunk_to_group_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the group to add the chunk to as a bookmark
+        explode: false
+        in: path
+        name: tracking_id
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddChunkToGroupData'
+        description: JSON request payload to add a chunk to a group (bookmark it)
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the chunk was added to the group (bookmark'ed).
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in.
+      security:
+      - ApiKey:
+        - admin
+      summary: Add Chunk to Group by Tracking ID
+      tags:
+      - chunk_group
+    put:
+      description: |-
+        Update Group by Tracking ID
+
+        Update a chunk_group with the given tracking id.
+      operationId: update_group_by_tracking_id
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Tracking id of the chunk_group to update
+        explode: false
+        in: path
+        name: tracking_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGroupByTrackingIDData'
+        description: JSON request payload to update a chunkGroup
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the chunkGroup was updated
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to updating the chunkGroup
+      security:
+      - ApiKey:
+        - admin
+      summary: Update Group by Tracking ID
+      tags:
+      - chunk_group
+  /api/chunk_group/{group_id}:
+    delete:
+      description: |-
+        Delete Group
+
+        This will delete a chunk_group. This will not delete the chunks that are in the group. We will soon support deleting a chunk_group along with its member chunks.
+      operationId: delete_chunk_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the group you want to fetch.
+        explode: false
+        in: path
+        name: group_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: Delete the chunks within the group
+        explode: true
+        in: query
+        name: delete_chunks
+        required: true
+        schema:
+          type: boolean
+        style: form
+      responses:
+        "204":
+          description: Confirmation that the chunkGroup was deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to deleting the chunkGroup
+      security:
+      - ApiKey:
+        - admin
+      summary: Delete Group
+      tags:
+      - chunk_group
+    get:
+      description: |-
+        Get Group
+
+        Fetch the group with the given id.
+        get_group
+      operationId: get_chunk_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the group you want to fetch.
+        explode: false
+        in: path
+        name: group_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkGroup'
+          description: JSON body representing the group with the given tracking id
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the group with the given
+            tracking id
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Group
+      tags:
+      - chunk_group
+  /api/chunk_group/{group_id}/{page}:
+    get:
+      description: |-
+        Get Chunks in Group
+
+        Route to get all chunks for a group. The response is paginated, with each page containing 10 chunks. Support for custom page size is coming soon.
+      operationId: get_chunks_in_group
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: Id of the group you want to fetch.
+        explode: false
+        in: path
+        name: group_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: The page of chunks to get from the group
+        explode: false
+        in: path
+        name: page
+        required: true
+        schema:
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookmarkData'
+          description: Chunks present within the specified group
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups that the chunk
+            is in
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Chunks in Group
+      tags:
+      - chunk_group
+  /api/dataset:
+    delete:
+      description: |-
+        Delete Dataset
+
+        Delete a dataset. The auth'ed user must be an owner of the organization to delete a dataset.
+      operationId: delete_dataset
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteDatasetRequest'
+        description: JSON request payload to delete a dataset
+        required: true
+      responses:
+        "204":
+          description: Dataset deleted successfully
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to deleting the dataset
+      security:
+      - ApiKey:
+        - owner
+      summary: Delete Dataset
+      tags:
+      - dataset
+    post:
+      description: |-
+        Create dataset
+
+        Create a new dataset. The auth'ed user must be an owner of the organization to create a dataset.
+      operationId: create_dataset
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDatasetRequest'
+        description: JSON request payload to create a new dataset
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dataset'
+          description: Dataset created successfully
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating the dataset
+      security:
+      - ApiKey:
+        - owner
+      summary: Create dataset
+      tags:
+      - dataset
+    put:
+      description: |-
+        Update Dataset
+
+        Update a dataset. The auth'ed user must be an owner of the organization to update a dataset.
+      operationId: update_dataset
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDatasetRequest'
+        description: JSON request payload to update a dataset
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dataset'
+          description: Dataset updated successfully
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to updating the dataset
+      security:
+      - ApiKey:
+        - owner
+      summary: Update Dataset
+      tags:
+      - dataset
+  /api/dataset/envs:
+    get:
+      description: |-
+        Get Client Configuration
+
+        Get the client configuration for a dataset. Will use the TR-D
+      operationId: get_client_dataset_config
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientDatasetConfiguration'
+          description: Dataset environment variables
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to retrieving the dataset. Typically
+            this only happens when your auth credentials are invalid.
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Client Configuration
+      tags:
+      - dataset
+  /api/dataset/files/{dataset_id}/{page}:
+    get:
+      description: |-
+        Get Files for Dataset
+
+        Get all files which belong to a given dataset specified by the dataset_id parameter. 10 files are returned per page.
+      operationId: get_dataset_files_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the dataset to fetch files for.
+        explode: false
+        in: path
+        name: dataset_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: The page number of files you wish to fetch. Each page contains
+          at most 10 files.
+        explode: false
+        in: path
+        name: page
+        required: true
+        schema:
+          format: int64
+          minimum: 0
+          type: integer
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/File'
+                type: array
+          description: JSON body representing the files in the current dataset
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the files in the current
+            datase
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Files for Dataset
+      tags:
+      - file
+  /api/dataset/groups/{dataset_id}/{page}:
+    get:
+      description: |-
+        Get Groups for Dataset
+
+        Fetch the groups which belong to a dataset specified by its id.
+      operationId: get_specific_dataset_chunk_groups
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the dataset to fetch groups for.
+        explode: false
+        in: path
+        name: dataset_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: The page of groups to fetch. Each page contains 10 groups. Support
+          for custom page size is coming soon.
+        explode: false
+        in: path
+        name: page
+        required: true
+        schema:
+          format: int64
+          type: integer
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupData'
+          description: JSON body representing the groups created by the given dataset
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the groups created by the
+            given dataset
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get Groups for Dataset
+      tags:
+      - chunk_group
+  /api/dataset/organization/{organization_id}:
+    get:
+      description: |-
+        Get Datasets from Organization
+
+        Get all datasets for an organization. The auth'ed user must be an admin or owner of the organization to get its datasets.
+      operationId: get_datasets_from_organization
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: id of the organization you want to retrieve datasets for
+        explode: false
+        in: path
+        name: organization_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/DatasetAndUsage'
+                type: array
+          description: Datasets retrieved successfully
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to retrieving the dataset
+      security:
+      - ApiKey:
+        - admin
+      summary: Get Datasets from Organization
+      tags:
+      - dataset
+  /api/dataset/{dataset_id}:
+    get:
+      description: |-
+        Get Dataset
+
+        Get a dataset by id. The auth'ed user must be an admin or owner of the organization to get a dataset.
+      operationId: get_dataset
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the dataset you want to retrieve.
+        explode: false
+        in: path
+        name: dataset_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dataset'
+          description: Dataset retrieved successfully
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to retrieving the dataset
+      security:
+      - ApiKey:
+        - admin
+      summary: Get Dataset
+      tags:
+      - dataset
+  /api/events:
+    post:
+      description: |-
+        Get events for the dataset
+
+        Get events for the auth'ed user. Currently, this is only for events belonging to the auth'ed user. Soon, we plan to associate events to datasets instead of users.
+      operationId: get_events
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetEventsData'
+        description: JSON request payload to get events for a dataset
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventReturn'
+          description: Events for the dataset
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting events for the dataset
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get events for the dataset
+      tags:
+      - events
+  /api/file:
+    post:
+      description: |-
+        Upload File
+
+        Upload a file to S3 attached to the server. The file will be converted to HTML with tika and chunked algorithmically, images will be OCR'ed with tesseract. The resulting chunks will be indexed and searchable. Optionally, you can only upload the file and manually create chunks associated to the file after. See docs.trieve.ai and/or contact us for more details and tips. Auth'ed user must be an admin or owner of the dataset's organization to upload a file.
+      operationId: upload_file_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadFileData'
+        description: JSON request payload to upload a file
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadFileResult'
+          description: Confirmation that the file is uploading
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to uploading the file
+      security:
+      - ApiKey:
+        - admin
+      summary: Upload File
+      tags:
+      - file
+  /api/file/{file_id}:
+    delete:
+      description: |-
+        Delete File
+
+        Delete a file from S3 attached to the server based on its id. This will disassociate chunks from the file, but will not delete the chunks. We plan to add support for deleting chunks in a release soon. Auth'ed user must be an admin or owner of the dataset's organization to upload a file.
+      operationId: delete_file_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the file to delete
+        explode: false
+        in: path
+        name: file_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: Whether or not to delete the chunks associated with the file
+        explode: true
+        in: query
+        name: delete_chunks
+        required: true
+        schema:
+          type: boolean
+        style: form
+      responses:
+        "204":
+          description: Confirmation that the file has been deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding or deleting the file
+      security:
+      - ApiKey:
+        - admin
+      summary: Delete File
+      tags:
+      - file
+    get:
+      description: |-
+        Get File
+
+        Download a file from S3 attached to the server based on its id. We plan to add support for getting signed S3 URLs to download from S3 directly in a release soon.
+      operationId: get_file_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the file to fetch
+        explode: false
+        in: path
+        name: file_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileDTO'
+          description: The signed s3 url corresponding to the file_id requested
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding the file
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get File
+      tags:
+      - file
+  /api/health:
+    get:
+      description: |-
+        Health Check
+
+        Confirmation that the service is healthy and can make embedding vectors
+      operationId: health_check
+      responses:
+        "200":
+          description: Confirmation that the service is healthy and can make embedding
+            vectors
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to making an embedding or overall service
+            health
+      summary: Health Check
+      tags:
+      - health
+  /api/invitation:
+    post:
+      description: |-
+        Send Invitation
+
+        Invitations act as a way to invite users to join an organization. After a user is invited, they will automatically be added to the organization with the role specified in the invitation once they set their.
+      operationId: post_invitation
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationData'
+        description: JSON request payload to send an invitation
+        required: true
+      responses:
+        "204":
+          description: Ok response. Indicates that invitation email was sent correctly.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Invalid email or some other error
+      security:
+      - ApiKey:
+        - admin
+      summary: Send Invitation
+      tags:
+      - invitation
+  /api/message:
+    delete:
+      description: |-
+        Regenerate message
+
+        Regenerate the assistant response to the last user message of a topic. This will delete the last message and replace it with a new message. The response will include Chunks first on the stream if the topic is using RAG. The structure will look like `[chunks]||mesage`. See docs.trieve.ai for more information.
+      operationId: regenerate_message_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegenerateMessageData'
+        description: JSON request payload to delete an agent message then regenerate
+          it in a strem
+        required: true
+      responses:
+        "200":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: This will be a JSON response of a string containing the LLM's
+            generated inference. Response if not streaming.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting a chat completion
+      security:
+      - ApiKey:
+        - readonly
+      summary: Regenerate message
+      tags:
+      - message
+    post:
+      description: |-
+        Create a message
+
+        Create a message. Messages are attached to topics in order to coordinate memory of gen-AI chat sessions. We are considering refactoring this resource of the API soon. Currently, you can only send user messages. If the topic is a RAG topic then the response will include Chunks first on the stream. The structure will look like `[chunks]||mesage`. See docs.trieve.ai for more information.
+      operationId: create_message_completion_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMessageData'
+        description: JSON request payload to create a message completion
+        required: true
+      responses:
+        "200":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: This will be a JSON response of a string containing the LLM's
+            generated inference. Response if not streaming.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting a chat completion
+      security:
+      - ApiKey:
+        - readonly
+      summary: Create a message
+      tags:
+      - message
+    put:
+      description: |-
+        Edit a message
+
+        Edit a message which exists within the topic's chat history. This will delete the message and replace it with a new message. The new message will be generated by the AI based on the new content provided in the request body. The response will include Chunks first on the stream if the topic is using RAG. The structure will look like `[chunks]||mesage`. See docs.trieve.ai for more information.
+      operationId: edit_message_handler
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditMessageData'
+        description: JSON request payload to edit a message and get a new stream
+        required: true
+      responses:
+        "200":
+          description: "This will be a HTTP stream, check the chat or search UI for\
+            \ an example how to process this"
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting a chat completion
+      security:
+      - ApiKey:
+        - readonly
+      summary: Edit a message
+      tags:
+      - message
+  /api/messages/{messages_topic_id}:
+    get:
+      description: |-
+        Get all messages for a given topic
+
+        Get all messages for a given topic. If the topic is a RAG topic then the response will include Chunks first on each message. The structure will look like `[chunks]||mesage`. See docs.trieve.ai for more information.
+      operationId: get_all_topic_messages
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The ID of the topic to get messages for.
+        explode: false
+        in: path
+        name: messages_topic_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Message'
+                type: array
+          description: All messages relating to the topic with the given ID
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting the messages
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get all messages for a given topic
+      tags:
+      - message
+  /api/organization:
+    post:
+      description: |-
+        Create Organization
+
+        Create a new organization. The auth'ed user who creates the organization will be the default owner of the organization.
+      operationId: create_organization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrganizationData'
+        description: The organization data that you want to create
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: Created organization object
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating the organization
+      security:
+      - ApiKey:
+        - readonly
+      summary: Create Organization
+      tags:
+      - organization
+    put:
+      description: |-
+        Update Organization
+
+        Update an organization. Only the owner of the organization can update it.
+      operationId: update_organization
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrganizationData'
+        description: The organization data that you want to update
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: Updated organization object
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to updating the organization
+      security:
+      - ApiKey:
+        - owner
+      summary: Update Organization
+      tags:
+      - organization
+  /api/organization/usage/{organization_id}:
+    get:
+      description: |-
+        Get Organization Usage
+
+        Fetch the current usage specification of an organization by its id. The auth'ed user must be an admin or owner of the organization to fetch it.
+      operationId: get_organization_usage
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the organization you want to fetch the usage of.
+        explode: false
+        in: path
+        name: organization_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationUsageCount'
+          description: The current usage of the specified organization
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding the organization's usage
+            by id
+      security:
+      - ApiKey:
+        - admin
+      summary: Get Organization Usage
+      tags:
+      - organization
+  /api/organization/users/{organization_id}:
+    get:
+      description: |-
+        Get Organization Users
+
+        Fetch the users of an organization by its id. The auth'ed user must be an admin or owner of the organization to fetch it.
+      operationId: get_organization_users
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the organization you want to fetch the users of.
+        explode: false
+        in: path
+        name: organization_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SlimUser'
+                type: array
+          description: Array of users who belong to the specified by organization
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding the organization's users
+            by id
+      security:
+      - ApiKey:
+        - admin
+      summary: Get Organization Users
+      tags:
+      - organization
+  /api/organization/{organization_id}:
+    delete:
+      description: |-
+        Delete Organization
+
+        Delete an organization by its id. The auth'ed user must be an owner of the organization to delete it.
+      operationId: delete_organization_by_id
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the organization you want to fetch.
+        explode: false
+        in: path
+        name: organization_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: Confirmation that the organization was deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to deleting the organization by id
+      security:
+      - ApiKey:
+        - admin
+      summary: Delete Organization
+      tags:
+      - organization
+    get:
+      description: |-
+        Get Organization
+
+        Fetch the details of an organization by its id. The auth'ed user must be an admin or owner of the organization to fetch it.
+      operationId: get_organization_by_id
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: The id of the organization you want to fetch.
+        explode: false
+        in: path
+        name: organization_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: Organization with the id that was requested
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to finding the organization by id
+      security:
+      - ApiKey:
+        - admin
+      summary: Get Organization
+      tags:
+      - organization
+  /api/stripe/payment_link/{plan_id}/{organization_id}:
+    get:
+      description: |-
+        Checkout
+
+        Get a direct link to the stripe checkout page for the plan and organization
+      operationId: direct_to_payment_link
+      parameters:
+      - description: id of the plan you want to subscribe to
+        explode: false
+        in: path
+        name: plan_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: id of the organization you want to subscribe to the plan
+        explode: false
+        in: path
+        name: organization_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "303":
+          description: SeeOther response redirecting user to stripe checkout page
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating a URL for a stripe checkout
+            page
+      summary: Checkout
+      tags:
+      - stripe
+  /api/stripe/plans:
+    get:
+      description: |-
+        Get All Plans
+
+        Get a list of all plans
+      operationId: get_all_plans
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/StripePlan'
+                type: array
+          description: List of all plans
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to getting all plans
+      summary: Get All Plans
+      tags:
+      - stripe
+  /api/stripe/subscription/{subscription_id}:
+    delete:
+      description: |-
+        Cancel Subscription
+
+        Cancel a subscription by its id
+      operationId: cancel_subscription
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: id of the subscription you want to cancel
+        explode: false
+        in: path
+        name: subscription_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Confirmation that the subscription was cancelled
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating a URL for a stripe checkout
+            page
+      security:
+      - ApiKey:
+        - owner
+      summary: Cancel Subscription
+      tags:
+      - stripe
+  /api/stripe/subscription_plan/{subscription_id}/{plan_id}:
+    patch:
+      description: |-
+        Update Subscription Plan
+
+        Update a subscription to a new plan
+      operationId: update_subscription_plan
+      parameters:
+      - description: The organization id to use for the request
+        explode: false
+        in: header
+        name: TR-Organization
+        required: true
+        schema:
+          type: string
+        style: simple
+      - description: id of the subscription you want to update
+        explode: false
+        in: path
+        name: subscription_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: id of the plan you want to subscribe to
+        explode: false
+        in: path
+        name: plan_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Confirmation that the subscription was updated to the new plan
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to updating the subscription to the
+            new plan
+      security:
+      - ApiKey:
+        - readonly
+      summary: Update Subscription Plan
+      tags:
+      - stripe
+  /api/topic:
+    delete:
+      description: |-
+        Delete Topic
+
+        Delete an existing chat topic. When a topic is deleted, all associated chat messages are also deleted.
+      operationId: delete_topic
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteTopicData'
+        description: JSON request payload to delete a chat topic
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the topic was deleted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to topic deletion
+      security:
+      - ApiKey:
+        - readonly
+      summary: Delete Topic
+      tags:
+      - topic
+    post:
+      description: |-
+        Create Topic
+
+        Create a new chat topic. Topics are attached to a user and act as a coordinator for memory of gen-AI chat sessions. We are considering refactoring this resource of the API soon.
+      operationId: create_topic
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTopicData'
+        description: JSON request payload to create chat topic
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topic'
+          description: The JSON response payload containing the created topic
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Topic name empty or a service error
+      security:
+      - ApiKey:
+        - readonly
+      summary: Create Topic
+      tags:
+      - topic
+    put:
+      description: |-
+        Update Topic
+
+        Update an existing chat topic. Currently, only the name of the topic can be updated.
+      operationId: update_topic
+      parameters:
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTopicData'
+        description: JSON request payload to update a chat topic
+        required: true
+      responses:
+        "204":
+          description: Confirmation that the topic was updated
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to topic update
+      security:
+      - ApiKey:
+        - readonly
+      summary: Update Topic
+      tags:
+      - topic
+  /api/topic/user/{user_id}:
+    get:
+      description: |-
+        Get All Topics for User
+
+        Get all topics belonging to a the auth'ed user. Soon, we plan to allow specification of the user for this route and include pagination.
+      operationId: get_all_topics_for_user
+      parameters:
+      - description: The id of the user to get topics for
+        explode: false
+        in: path
+        name: user_id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - description: The dataset id to use for the request
+        explode: false
+        in: header
+        name: TR-Dataset
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Topic'
+                type: array
+          description: All topics belonging to a given user
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to topic get
+      security:
+      - ApiKey:
+        - readonly
+      summary: Get All Topics for User
+      tags:
+      - topic
+  /api/user:
+    put:
+      description: |-
+        Update User
+
+        Update a user's information. If the user_id is not provided, the auth'ed user will be updated. If the user_id is provided, the auth'ed user must be an admin (1) or owner (2) of the organization.
+      operationId: update_user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserData'
+        description: JSON request payload to update user information for the auth'ed
+          user
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlimUser'
+          description: JSON body representing the updated user information
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to updating the user
+      security:
+      - ApiKey:
+        - readonly
+      summary: Update User
+      tags:
+      - user
+  /api/user/delete_api_key:
+    delete:
+      description: |-
+        Delete User Api Key
+
+        Delete an api key for the auth'ed user.
+      operationId: delete_user_api_key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteUserApiKeyRequest'
+        description: JSON request payload to delete a user api key
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ApiKeyDTO'
+                type: array
+          description: JSON body representing the api_key for the user
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating api_key for the user
+      security:
+      - ApiKey:
+        - readonly
+      summary: Delete User Api Key
+      tags:
+      - user
+  /api/user/set_api_key:
+    post:
+      description: |-
+        Set User Api Key
+
+        Create a new api key for the auth'ed user. Successful response will contain the newly created api key. If a write role is assigned the api key will have permission level of the auth'ed user who calls this endpoint.
+      operationId: set_user_api_key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetUserApiKeyRequest'
+        description: JSON request payload to create a new user api key
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetUserApiKeyResponse'
+          description: JSON body representing the api_key for the user
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseBody'
+          description: Service error relating to creating api_key for the user
+      security:
+      - ApiKey:
+        - readonly
+      summary: Set User Api Key
+      tags:
+      - user
+components:
+  schemas:
+    AddChunkToGroupData:
+      example:
+        chunk_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        chunk_id:
+          description: Id of the chunk to make a member of the group.
+          format: uuid
+          type: string
+      required:
+      - chunk_id
+      type: object
+    ApiKeyDTO:
+      example:
+        created_at: 2021-01-01T00:00:00
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        role: 1
+        updated_at: 2021-01-01T00:00:00
+        user_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        role:
+          format: int32
+          type: integer
+        updated_at:
+          format: date-time
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+      - created_at
+      - id
+      - name
+      - role
+      - updated_at
+      - user_id
+      type: object
+    AuthQuery:
+      example:
+        inv_code: 00000000-0000-0000-0000-000000000000
+        organization_id: 00000000-0000-0000-0000-000000000000
+        redirect_uri: https://api.trieve.ai
+      properties:
+        inv_code:
+          description: Code sent via email as a result of successful call to send_invitation
+          format: uuid
+          nullable: true
+          type: string
+        organization_id:
+          description: ID of organization to authenticate into
+          format: uuid
+          nullable: true
+          type: string
+        redirect_uri:
+          description: URL to redirect to after successful login
+          nullable: true
+          type: string
+      type: object
+    BatchQueuedChunkResponse:
+      example:
+        chunk_metadata:
+        - chunk_vector:
+          - 0.1
+          - 0.2
+          - 0.3
+          content: Some content
+          file_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+          link: https://example.com
+          metadata:
+            key1: value1
+            key2: value2
+          tag_set:
+          - tag1
+          - tag2
+          time_stamp: 2021-01-01T00:00:00
+          tracking_id: tracking_id
+          weight: 0.5
+        - chunk_vector:
+          - 0.1
+          - 0.2
+          - 0.3
+          content: Some content
+          file_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+          link: https://example.com
+          metadata:
+            key1: value1
+            key2: value2
+          tag_set:
+          - tag1
+          - tag2
+          time_stamp: 2021-01-01T00:00:00
+          tracking_id: tracking_id
+          weight: 0.5
+        pos_in_queue: 2
+      properties:
+        chunk_metadata:
+          items:
+            $ref: '#/components/schemas/ChunkMetadata'
+          type: array
+        pos_in_queue:
+          description: The current position the last access item is in the queue
+          format: int32
+          type: integer
+      required:
+      - chunk_metadata
+      - pos_in_queue
+      type: object
+    BookmarkData:
+      example:
+        chunks:
+        - chunk_html: "<p>Hello, world!</p>"
+          content: "Hello, world!"
+          created_at: 2021-01-01T00:00:00
+          file_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          file_name: file.txt
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          link: https://trieve.ai
+          metadata:
+            key: value
+          qdrant_point_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          tag_set: "tag1,tag2"
+          time_stamp: 2021-01-01T00:00:00
+          tracking_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          updated_at: 2021-01-01T00:00:00
+          weight: 0.5
+        - chunk_html: "<p>Hello, world!</p>"
+          content: "Hello, world!"
+          created_at: 2021-01-01T00:00:00
+          file_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          file_name: file.txt
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          link: https://trieve.ai
+          metadata:
+            key: value
+          qdrant_point_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          tag_set: "tag1,tag2"
+          time_stamp: 2021-01-01T00:00:00
+          tracking_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          updated_at: 2021-01-01T00:00:00
+          weight: 0.5
+        total_pages: 0
+        group:
+          created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          tracking_id: "3"
+          updated_at: 2021-01-01T00:00:00
+      properties:
+        chunks:
+          items:
+            $ref: '#/components/schemas/ChunkMetadataWithFileData'
+          type: array
+        group:
+          $ref: '#/components/schemas/ChunkGroup'
+        total_pages:
+          format: int64
+          type: integer
+      required:
+      - chunks
+      - group
+      - total_pages
+      type: object
+    BookmarkGroupResult:
+      example:
+        slim_groups:
+        - dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          of_current_dataset: true
+        - dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          of_current_dataset: true
+        chunk_uuid: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        chunk_uuid:
+          format: uuid
+          type: string
+        slim_groups:
+          items:
+            $ref: '#/components/schemas/SlimGroup'
+          type: array
+      required:
+      - chunk_uuid
+      - slim_groups
+      type: object
+    ChatMessageProxy:
+      example:
+        content: "Hello, world!"
+        role: user
+      properties:
+        content:
+          type: string
+        role:
+          type: string
+      required:
+      - content
+      - role
+      type: object
+    ChunkData:
+      example:
+        chunk_html: <p>Some HTML content</p>
+        chunk_vector:
+        - 0.1
+        - 0.2
+        - 0.3
+        file_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_ids:
+        - d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_tracking_ids:
+        - group_tracking_id
+        link: https://example.com
+        metadata:
+          key1: value1
+          key2: value2
+        split_avg: false
+        tag_set:
+        - tag1
+        - tag2
+        time_stamp: 2021-01-01T00:00:00
+        tracking_id: tracking_id
+        upsert_by_tracking_id: true
+        weight: 0.5
+      properties:
+        chunk_html:
+          description: "HTML content of the chunk. This can also be plaintext. The\
+            \ innerText of the HTML will be used to create the embedding vector. The\
+            \ point of using HTML is for convienience, as some users have applications\
+            \ where users submit HTML content."
+          nullable: true
+          type: string
+        chunk_vector:
+          description: "Chunk_vector is a vector of floats which can be used instead\
+            \ of generating a new embedding. This is useful for when you are using\
+            \ a pre-embedded dataset. If this is not provided, the innerText of the\
+            \ chunk_html will be used to create the embedding."
+          items:
+            format: float
+            type: number
+          nullable: true
+          type: array
+        file_id:
+          description: File_uuid is the uuid of the file that the chunk is associated
+            with. This is used to associate chunks with files. This is useful for
+            when you want to delete a file and all of its associated chunks.
+          format: uuid
+          nullable: true
+          type: string
+        group_ids:
+          description: Group ids are the ids of the groups that the chunk should be
+            placed into. This is useful for when you want to create a chunk and add
+            it to a group or multiple groups in one request. Necessary because this
+            route queues the chunk for ingestion and the chunk may not exist yet immediately
+            after response.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        group_tracking_ids:
+          description: Group tracking_ids are the tracking_ids of the groups that
+            the chunk should be placed into. This is useful for when you want to create
+            a chunk and add it to a group or multiple groups in one request. Necessary
+            because this route queues the chunk for ingestion and the chunk may not
+            exist yet immediately after response.
+          items:
+            type: string
+          nullable: true
+          type: array
+        link:
+          description: "Link to the chunk. This can also be any string. Frequently,\
+            \ this is a link to the source of the chunk. The link value will not affect\
+            \ the embedding creation."
+          nullable: true
+          type: string
+        metadata:
+          description: "Metadata is a JSON object which can be used to filter chunks.\
+            \ This is useful for when you want to filter chunks by arbitrary metadata.\
+            \ Unlike with tag filtering, there is a performance hit for filtering\
+            \ on metadata."
+          nullable: true
+        split_avg:
+          description: Split avg is a boolean which tells the server to split the
+            text in the chunk_html into smaller chunks and average their resulting
+            vectors. This is useful for when you want to create a chunk from a large
+            piece of text and want to split it into smaller chunks to create a more
+            fuzzy average dense vector. The sparse vector will be generated normally
+            with no averaging. By default this is false.
+          nullable: true
+          type: boolean
+        tag_set:
+          description: "Tag set is a list of tags. This can be used to filter chunks\
+            \ by tag. Unlike with metadata filtering, HNSW indices will exist for\
+            \ each tag such that there is not a performance hit for filtering on them."
+          items:
+            type: string
+          nullable: true
+          type: array
+        time_stamp:
+          description: Time_stamp should be an ISO 8601 combined date and time without
+            timezone. It is used for time window filtering and recency-biasing search
+            results.
+          nullable: true
+          type: string
+        tracking_id:
+          description: Tracking_id is a string which can be used to identify a chunk.
+            This is useful for when you are coordinating with an external system and
+            want to use the tracking_id to identify the chunk.
+          nullable: true
+          type: string
+        upsert_by_tracking_id:
+          description: "Upsert when a chunk with the same tracking_id exists. By default\
+            \ this is false, and the request will fail if a chunk with the same tracking_id\
+            \ exists. If this is true, the chunk will be updated if a chunk with the\
+            \ same tracking_id exists."
+          nullable: true
+          type: boolean
+        weight:
+          description: Weight is a float which can be used to bias search results.
+            This is useful for when you want to bias search results for a chunk. The
+            magnitude only matters relative to other chunks in the chunk's dataset
+            dataset.
+          format: double
+          nullable: true
+          type: number
+      type: object
+    ChunkFilter:
+      example:
+        must:
+        - field: metadata.key2
+          match:
+          - value3
+          - value4
+          range:
+            gt: 0
+            gte: 0
+            lt: 1
+            lte: 1
+        must_not:
+        - field: metadata.key3
+          match:
+          - value5
+          - value6
+          range:
+            gt: 0
+            gte: 0
+            lt: 1
+            lte: 1
+        should:
+        - field: metadata.key1
+          match:
+          - value1
+          - value2
+          range:
+            gt: 0
+            gte: 0
+            lt: 1
+            lte: 1
+      properties:
+        must:
+          description: All of these field conditions have to match for the chunk to
+            be included in the result set.
+          items:
+            $ref: '#/components/schemas/FieldCondition'
+          nullable: true
+          type: array
+        must_not:
+          description: None of these field conditions can match for the chunk to be
+            included in the result set.
+          items:
+            $ref: '#/components/schemas/FieldCondition'
+          nullable: true
+          type: array
+        should:
+          description: Only one of these field conditions has to match for the chunk
+            to be included in the result set.
+          items:
+            $ref: '#/components/schemas/FieldCondition'
+          nullable: true
+          type: array
+      type: object
+    ChunkGroup:
+      example:
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        tracking_id: "3"
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        description:
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        tracking_id:
+          nullable: true
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - created_at
+      - dataset_id
+      - description
+      - id
+      - name
+      - updated_at
+      type: object
+    ChunkGroupAndFile:
+      example:
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        description: A group of chunks
+        file_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        tracking_id: "3"
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        description:
+          type: string
+        file_id:
+          format: uuid
+          nullable: true
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        tracking_id:
+          nullable: true
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - created_at
+      - dataset_id
+      - description
+      - id
+      - name
+      - updated_at
+      type: object
+    ChunkMetadata:
+      example:
+        chunk_html: "<p>Hello, world!</p>"
+        content: "Hello, world!"
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        link: https://trieve.ai
+        metadata:
+          key: value
+        qdrant_point_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        tag_set: "tag1,tag2"
+        time_stamp: 2021-01-01T00:00:00
+        tracking_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        updated_at: 2021-01-01T00:00:00
+        weight: 0.5
+      properties:
+        chunk_html:
+          nullable: true
+          type: string
+        content:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        id:
+          format: uuid
+          type: string
+        link:
+          nullable: true
+          type: string
+        metadata:
+          nullable: true
+        qdrant_point_id:
+          format: uuid
+          nullable: true
+          type: string
+        tag_set:
+          nullable: true
+          type: string
+        time_stamp:
+          format: date-time
+          nullable: true
+          type: string
+        tracking_id:
+          nullable: true
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        weight:
+          format: double
+          type: number
+      required:
+      - content
+      - created_at
+      - dataset_id
+      - id
+      - updated_at
+      - weight
+      type: object
+    ChunkMetadataWithFileData:
+      example:
+        chunk_html: "<p>Hello, world!</p>"
+        content: "Hello, world!"
+        created_at: 2021-01-01T00:00:00
+        file_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        file_name: file.txt
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        link: https://trieve.ai
+        metadata:
+          key: value
+        qdrant_point_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        tag_set: "tag1,tag2"
+        time_stamp: 2021-01-01T00:00:00
+        tracking_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        updated_at: 2021-01-01T00:00:00
+        weight: 0.5
+      properties:
+        chunk_html:
+          nullable: true
+          type: string
+        content:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        file_id:
+          format: uuid
+          nullable: true
+          type: string
+        file_name:
+          nullable: true
+          type: string
+        id:
+          format: uuid
+          type: string
+        link:
+          nullable: true
+          type: string
+        metadata:
+          nullable: true
+        qdrant_point_id:
+          format: uuid
+          type: string
+        tag_set:
+          nullable: true
+          type: string
+        time_stamp:
+          format: date-time
+          nullable: true
+          type: string
+        tracking_id:
+          nullable: true
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        weight:
+          format: double
+          type: number
+      required:
+      - content
+      - created_at
+      - id
+      - qdrant_point_id
+      - updated_at
+      - weight
+      type: object
+    ClientDatasetConfiguration:
+      example:
+        CREATE_CHUNK_FEATURE: true
+        DATE_RANGE_VALUE: date range value
+        DOCUMENT_UPLOAD_FEATURE: true
+        FILE_NAME_KEY: file_name_key
+        FILTER_ITEMS: []
+        FRONTMATTER_VALS: frontmatter vals
+        IMAGE_RANGE_END_KEY: image range end key
+        IMAGE_RANGE_START_KEY: image range start key
+        LINES_BEFORE_SHOW_MORE: 10
+        SEARCH_QUERIES: search queries
+        SUGGESTED_QUERIES: suggested queries
+      properties:
+        CREATE_CHUNK_FEATURE:
+          nullable: true
+          type: boolean
+        DATE_RANGE_VALUE:
+          nullable: true
+          type: string
+        DOCUMENT_UPLOAD_FEATURE:
+          nullable: true
+          type: boolean
+        FILE_NAME_KEY:
+          type: string
+        FILTER_ITEMS:
+          nullable: true
+        FRONTMATTER_VALS:
+          nullable: true
+          type: string
+        IMAGE_RANGE_END_KEY:
+          nullable: true
+          type: string
+        IMAGE_RANGE_START_KEY:
+          nullable: true
+          type: string
+        LINES_BEFORE_SHOW_MORE:
+          minimum: 0
+          nullable: true
+          type: integer
+        SEARCH_QUERIES:
+          nullable: true
+          type: string
+        SUGGESTED_QUERIES:
+          nullable: true
+          type: string
+      required:
+      - FILE_NAME_KEY
+      type: object
+    CreateBatchChunkData:
+      example:
+      - chunk_html: <p>Some HTML content</p>
+        chunk_vector:
+        - 0.1
+        - 0.2
+        - 0.3
+        file_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_ids:
+        - d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_tracking_ids:
+        - group_tracking_id
+        link: https://example.com
+        metadata:
+          key1: value1
+          key2: value2
+        split_avg: false
+        tag_set:
+        - tag1
+        - tag2
+        time_stamp: 2021-01-01T00:00:00
+        tracking_id: tracking_id
+        upsert_by_tracking_id: true
+        weight: 0.5
+      - chunk_html: <p>Some more HTML content</p>
+        chunk_vector:
+        - 0.1
+        - 0.2
+        - 0.3
+        file_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_ids:
+        - d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_tracking_ids:
+        - group_tracking_id
+        link: https://explain.com
+        metadata:
+          key1: value1
+          key2: value2
+        split_avg: false
+        tag_set:
+        - tag3
+        - tag4
+        time_stamp: 2021-01-01T00:00:00
+        tracking_id: tracking_id
+        upsert_by_tracking_id: true
+        weight: 0.5
+      items:
+        $ref: '#/components/schemas/ChunkData'
+      type: array
+    CreateChunkData:
+      oneOf:
+      - $ref: '#/components/schemas/CreateSingleChunkData'
+      - $ref: '#/components/schemas/CreateBatchChunkData'
+    CreateChunkGroupData:
+      example:
+        name: name
+        description: description
+        tracking_id: tracking_id
+      properties:
+        description:
+          description: Description to assign to the chunk_group. Convenience field
+            for you to avoid having to remember what the group is for.
+          type: string
+        name:
+          description: Name to assign to the chunk_group. Does not need to be unique.
+          type: string
+        tracking_id:
+          description: Optional tracking id to assign to the chunk_group. This is
+            a unique identifier for the chunk_group.
+          nullable: true
+          type: string
+      required:
+      - description
+      - name
+      type: object
+    CreateDatasetRequest:
+      example:
+        client_configuration: {}
+        dataset_name: My Dataset
+        organization_id: 00000000-0000-0000-0000-000000000000
+        server_configuration: {}
+      properties:
+        client_configuration:
+          description: "Client configuration for the dataset, can be arbitrary JSON.\
+            \ We recommend setting to `{}` to start. See docs.trieve.ai for more information\
+            \ or adjust with the admin dashboard."
+        dataset_name:
+          description: Name of the dataset. Must be unique within the organization.
+          type: string
+        organization_id:
+          description: Organization ID that the dataset will belong to.
+          format: uuid
+          type: string
+        server_configuration:
+          description: "Server configuration for the dataset, can be arbitrary JSON.\
+            \ We recommend setting to `{}` to start. See docs.trieve.ai for more information\
+            \ or adjust with the admin dashboard."
+      required:
+      - client_configuration
+      - dataset_name
+      - organization_id
+      - server_configuration
+      type: object
+    CreateMessageData:
+      example:
+        highlight_citations: true
+        stream_response: true
+        model: model
+        highlight_delimiters:
+        - highlight_delimiters
+        - highlight_delimiters
+        topic_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        new_message_content: new_message_content
+      properties:
+        highlight_citations:
+          description: "Whether or not to highlight the citations in the response.\
+            \ If this is set to true or not included, the citations will be highlighted.\
+            \ If this is set to false, the citations will not be highlighted. Default\
+            \ is true."
+          nullable: true
+          type: boolean
+        highlight_delimiters:
+          description: "The delimiters to use for highlighting the citations. If this\
+            \ is not included, the default delimiters will be used. Default is `[\"\
+            .\", \"!\", \"?\", \"\\n\", \"\\t\", \",\"]`."
+          items:
+            type: string
+          nullable: true
+          type: array
+        model:
+          description: "The model to use for the assistant's messages. This can be\
+            \ any model from the openrouter model list. If no model is provided, gpt-3.5-turbo\
+            \ will be used."
+          nullable: true
+          type: string
+        new_message_content:
+          description: The content of the user message to attach to the topic and
+            then generate an assistant message in response to.
+          type: string
+        stream_response:
+          description: "Whether or not to stream the response. If this is set to true\
+            \ or not included, the response will be a stream. If this is set to false,\
+            \ the response will be a normal JSON response. Default is true."
+          nullable: true
+          type: boolean
+        topic_id:
+          description: The ID of the topic to attach the message to.
+          format: uuid
+          type: string
+      required:
+      - new_message_content
+      - topic_id
+      type: object
+    CreateOrganizationData:
+      example:
+        name: name
+      properties:
+        name:
+          description: The arbitrary name which will be used to identify the organization.
+            This name must be unique.
+          type: string
+      required:
+      - name
+      type: object
+    CreateSingleChunkData:
+      $ref: '#/components/schemas/ChunkData'
+    CreateTopicData:
+      example:
+        name: name
+        first_user_message: first_user_message
+        model: model
+      properties:
+        first_user_message:
+          description: The first message which will belong to the topic. The topic
+            name is generated based on this message similar to how it works in the
+            OpenAI chat UX if a name is not explicitly provided on the name request
+            body key.
+          nullable: true
+          type: string
+        model:
+          description: "The model to use for the assistant's messages. This can be\
+            \ any model from the openrouter model list. If no model is provided, the\
+            \ gpt-3.5-turbo will be used."
+          nullable: true
+          type: string
+        name:
+          description: "The name of the topic. If this is not provided, the topic\
+            \ name is generated from the first_user_message."
+          nullable: true
+          type: string
+      type: object
+    Dataset:
+      example:
+        client_configuration:
+          key: value
+        created_at: 2021-01-01T00:00:00
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        organization_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        server_configuration:
+          key: value
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        client_configuration: {}
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        organization_id:
+          format: uuid
+          type: string
+        server_configuration: {}
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - client_configuration
+      - created_at
+      - id
+      - name
+      - organization_id
+      - server_configuration
+      - updated_at
+      type: object
+    DatasetAndUsage:
+      example:
+        dataset:
+          client_configuration:
+            key: value
+          created_at: 2021-01-01T00:00:00
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          organization_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          updated_at: 2021-01-01T00:00:00
+        dataset_usage:
+          chunk_count: 100
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+      properties:
+        dataset:
+          $ref: '#/components/schemas/DatasetDTO'
+        dataset_usage:
+          $ref: '#/components/schemas/DatasetUsageCount'
+      required:
+      - dataset
+      - dataset_usage
+      type: object
+    DatasetDTO:
+      example:
+        client_configuration:
+          key: value
+        created_at: 2021-01-01T00:00:00
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        organization_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        client_configuration: {}
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        organization_id:
+          format: uuid
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - client_configuration
+      - created_at
+      - id
+      - name
+      - organization_id
+      - updated_at
+      type: object
+    DatasetUsageCount:
+      example:
+        chunk_count: 100
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+      properties:
+        chunk_count:
+          format: int32
+          type: integer
+        dataset_id:
+          format: uuid
+          type: string
+        id:
+          format: uuid
+          type: string
+      required:
+      - chunk_count
+      - dataset_id
+      - id
+      type: object
+    DeleteDatasetRequest:
+      example:
+        dataset_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        dataset_id:
+          description: The id of the dataset you want to delete.
+          format: uuid
+          type: string
+      required:
+      - dataset_id
+      type: object
+    DeleteTopicData:
+      example:
+        topic_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        topic_id:
+          description: The id of the topic to target.
+          format: uuid
+          type: string
+      required:
+      - topic_id
+      type: object
+    DeleteUserApiKeyRequest:
+      example:
+        api_key_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        api_key_id:
+          description: The id of the api key to delete.
+          format: uuid
+          type: string
+      required:
+      - api_key_id
+      type: object
+    EditMessageData:
+      example:
+        highlight_citations: true
+        stream_response: true
+        message_sort_order: 0
+        model: model
+        highlight_delimiters:
+        - highlight_delimiters
+        - highlight_delimiters
+        topic_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        new_message_content: new_message_content
+      properties:
+        highlight_citations:
+          description: "Whether or not to highlight the citations in the response.\
+            \ If this is set to true or not included, the citations will be highlighted.\
+            \ If this is set to false, the citations will not be highlighted. Default\
+            \ is true."
+          nullable: true
+          type: boolean
+        highlight_delimiters:
+          description: "The delimiters to use for highlighting the citations. If this\
+            \ is not included, the default delimiters will be used. Default is `[\"\
+            .\", \"!\", \"?\", \"\\n\", \"\\t\", \",\"]`."
+          items:
+            type: string
+          nullable: true
+          type: array
+        message_sort_order:
+          description: The sort order of the message to edit.
+          format: int32
+          type: integer
+        model:
+          description: "The model to use for the assistant generative inferences.\
+            \ This can be any model from the openrouter model list. If no model is\
+            \ provided, the gpt-3.5-turbo will be used.~"
+          nullable: true
+          type: string
+        new_message_content:
+          description: The new content of the message to replace the old content with.
+          type: string
+        stream_response:
+          description: "Whether or not to stream the response. If this is set to true\
+            \ or not included, the response will be a stream. If this is set to false,\
+            \ the response will be a normal JSON response. Default is true."
+          nullable: true
+          type: boolean
+        topic_id:
+          description: The id of the topic to edit the message at the given sort order
+            for.
+          format: uuid
+          type: string
+      required:
+      - message_sort_order
+      - new_message_content
+      - topic_id
+      type: object
+    ErrorResponseBody:
+      example:
+        message: Bad Request
+      properties:
+        message:
+          type: string
+      required:
+      - message
+      type: object
+    Event:
+      example:
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        event_data:
+          file_name: file.txt
+          group_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        event_type: file_uploaded
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        event_data: {}
+        event_type:
+          type: string
+        id:
+          format: uuid
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - created_at
+      - dataset_id
+      - event_data
+      - event_type
+      - id
+      - updated_at
+      type: object
+    EventReturn:
+      example:
+        events:
+        - created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          event_data:
+            file_name: file.txt
+            group_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          event_type: file_uploaded
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          updated_at: 2021-01-01T00:00:00
+        - created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          event_data:
+            file_name: file.txt
+            group_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          event_type: file_uploaded
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          updated_at: 2021-01-01T00:00:00
+        page_count: 0
+      properties:
+        events:
+          items:
+            $ref: '#/components/schemas/Event'
+          type: array
+        page_count:
+          format: int32
+          type: integer
+      required:
+      - events
+      - page_count
+      type: object
+    FieldCondition:
+      example:
+        field: metadata.key1
+        match:
+        - value1
+        - value2
+        range:
+          gt: 0
+          gte: 0
+          lt: 1
+          lte: 1
+      properties:
+        field:
+          description: "Field is the name of the field to filter on. The field value\
+            \ will be used to check for an exact substring match on the metadata values\
+            \ for each existing chunk. This is useful for when you want to filter\
+            \ chunks by arbitrary metadata. To access fields inside of the metadata\
+            \ that you provide with the card, prefix the field name with `metadata.`."
+          type: string
+        match:
+          description: Match is the value to match on the field. The match value will
+            be used to check for an exact substring match on the metadata values for
+            each existing chunk. This is useful for when you want to filter chunks
+            by arbitrary metadata.
+          items:
+            $ref: '#/components/schemas/MatchCondition'
+          nullable: true
+          type: array
+        range:
+          allOf:
+          - $ref: '#/components/schemas/Range'
+          nullable: true
+      required:
+      - field
+      type: object
+    File:
+      example:
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        file_name: file.txt
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        link: https://trieve.ai
+        metadata:
+          key: value
+        size: 1000
+        tag_set: "tag1,tag2"
+        time_stamp: 2021-01-01T00:00:00
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        file_name:
+          type: string
+        id:
+          format: uuid
+          type: string
+        link:
+          nullable: true
+          type: string
+        metadata:
+          nullable: true
+        size:
+          format: int64
+          type: integer
+        tag_set:
+          nullable: true
+          type: string
+        time_stamp:
+          format: date-time
+          nullable: true
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - created_at
+      - dataset_id
+      - file_name
+      - id
+      - size
+      - updated_at
+      type: object
+    FileDTO:
+      example:
+        created_at: 2021-01-01T00:00:00
+        file_name: file.txt
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        link: https://trieve.ai
+        metadata:
+          key: value
+        s3_url: https://trieve.ai
+        size: 1000
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        file_name:
+          type: string
+        id:
+          format: uuid
+          type: string
+        link:
+          nullable: true
+          type: string
+        metadata:
+          nullable: true
+        s3_url:
+          type: string
+        size:
+          format: int64
+          type: integer
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - created_at
+      - file_name
+      - id
+      - s3_url
+      - size
+      - updated_at
+      type: object
+    GenerateChunksRequest:
+      example:
+        chunk_ids:
+        - d290f1ee-6c54-4b01-90e6-d701748f0851
+        model: text-embedding-small
+        prev_messages:
+        - content: I am going to provide several pieces of information (docs) for
+            you to use in response to a request or question.
+          role: user
+        prompt: 'Respond to the instruction and include the doc numbers that you used
+          in square brackets at the end of the sentences that you used the docs for:'
+        stream_response: true
+      properties:
+        chunk_ids:
+          description: The ids of the chunks to be retrieved and injected into the
+            context window for RAG.
+          items:
+            format: uuid
+            type: string
+          type: array
+        model:
+          description: "The model to use for the chat. This can be any model from\
+            \ the openrouter model list. If no model is provided, gpt-3.5-turbo will\
+            \ be used."
+          nullable: true
+          type: string
+        prev_messages:
+          description: The previous messages to be placed into the chat history. The
+            last message in this array will be the prompt for the model to inference
+            on. The length of this array must be at least 1.
+          items:
+            $ref: '#/components/schemas/ChatMessageProxy'
+          type: array
+        prompt:
+          description: Prompt for the last message in the prev_messages array. This
+            will be used to generate the next message in the chat. The default is
+            'Respond to the instruction and include the doc numbers that you used
+            in square brackets at the end of the sentences that you used the docs
+            for:'. You can also specify an empty string to leave the final message
+            alone such that your user's final message can be used as the prompt. See
+            docs.trieve.ai or contact us for more information.
+          nullable: true
+          type: string
+        stream_response:
+          description: "Whether or not to stream the response. If this is set to true\
+            \ or not included, the response will be a stream. If this is set to false,\
+            \ the response will be a normal JSON response. Default is true."
+          nullable: true
+          type: boolean
+      required:
+      - chunk_ids
+      - prev_messages
+      type: object
+    GetEventsData:
+      example:
+        page: 1
+        page_size: 10
+        type:
+        - card_action_failed
+      properties:
+        event_types:
+          description: "The types of events to get. Any combination of file_uploaded,\
+            \ card_uploaded, card_action_failed, or card_updated. Leave undefined\
+            \ to get all events."
+          items:
+            type: string
+          nullable: true
+          type: array
+        page:
+          description: The page number to get. Default is 1.
+          format: int64
+          nullable: true
+          type: integer
+        page_size:
+          description: The number of items per page. Default is 10.
+          format: int64
+          nullable: true
+          type: integer
+      type: object
+    GetGroupsForChunksData:
+      example:
+        chunk_ids:
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        chunk_ids:
+          items:
+            format: uuid
+            type: string
+          type: array
+      required:
+      - chunk_ids
+      type: object
+    GroupData:
+      example:
+        groups:
+        - created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          description: A group of chunks
+          file_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          tracking_id: "3"
+          updated_at: 2021-01-01T00:00:00
+        - created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          description: A group of chunks
+          file_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          tracking_id: "3"
+          updated_at: 2021-01-01T00:00:00
+        total_pages: 0
+      properties:
+        groups:
+          items:
+            $ref: '#/components/schemas/ChunkGroupAndFile'
+          type: array
+        total_pages:
+          format: int64
+          type: integer
+      required:
+      - groups
+      - total_pages
+      type: object
+    GroupScoreChunkDTO:
+      example:
+        metadata:
+        - metadata:
+          - chunk_html: <p>Some HTML content</p>
+            content: Some content
+            id: d290f1ee-6c54-4b01-90e6-d701748f0851
+            link: https://example.com
+            metadata:
+              key1: value1
+              key2: value2
+            time_stamp: 2021-01-01T00:00:00
+            weight: 0.5
+          score: 0.5
+        - metadata:
+          - chunk_html: <p>Some HTML content</p>
+            content: Some content
+            id: d290f1ee-6c54-4b01-90e6-d701748f0851
+            link: https://example.com
+            metadata:
+              key1: value1
+              key2: value2
+            time_stamp: 2021-01-01T00:00:00
+            weight: 0.5
+          score: 0.5
+        group_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        group_id:
+          format: uuid
+          type: string
+        metadata:
+          items:
+            $ref: '#/components/schemas/ScoreChunkDTO'
+          type: array
+      required:
+      - group_id
+      - metadata
+      type: object
+    InvitationData:
+      example:
+        user_role: 0
+        app_url: app_url
+        organization_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        redirect_uri: redirect_uri
+        email: email
+      properties:
+        app_url:
+          description: "The url of the app that the user will be directed to in order\
+            \ to set their password. Usually admin.trieve.ai, but may differ for local\
+            \ dev or self-hosted setups."
+          type: string
+        email:
+          description: The email of the user to invite. Must be a valid email as they
+            will be sent an email to register.
+          type: string
+        organization_id:
+          description: The id of the organization to invite the user to.
+          format: uuid
+          type: string
+        redirect_uri:
+          description: The url that the user will be redirected to after setting their
+            password.
+          type: string
+        user_role:
+          description: "The role the user will have in the organization. 0 = User,\
+            \ 1 = Admin, 2 = Owner."
+          format: int32
+          type: integer
+      required:
+      - app_url
+      - email
+      - organization_id
+      - redirect_uri
+      - user_role
+      type: object
+    MatchCondition:
+      oneOf:
+      - type: string
+      - format: int64
+        type: integer
+    Message:
+      example:
+        completion_tokens: 300
+        content: "Hello, world!"
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        deleted: false
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        prompt_tokens: 300
+        role: user
+        sort_order: 1
+        topic_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        completion_tokens:
+          format: int32
+          nullable: true
+          type: integer
+        content:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        deleted:
+          type: boolean
+        id:
+          format: uuid
+          type: string
+        prompt_tokens:
+          format: int32
+          nullable: true
+          type: integer
+        role:
+          type: string
+        sort_order:
+          format: int32
+          type: integer
+        topic_id:
+          format: uuid
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - content
+      - created_at
+      - dataset_id
+      - deleted
+      - id
+      - role
+      - sort_order
+      - topic_id
+      - updated_at
+      type: object
+    Organization:
+      example:
+        created_at: 2021-01-01T00:00:00
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        registerable: true
+        updated_at: 2021-01-01T00:00:00
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        registerable:
+          nullable: true
+          type: boolean
+        updated_at:
+          format: date-time
+          type: string
+      required:
+      - created_at
+      - id
+      - name
+      - updated_at
+      type: object
+    OrganizationUsageCount:
+      example:
+        dataset_count: 1
+        file_storage: 512
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        message_count: 1000
+        org_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        user_count: 5
+      properties:
+        dataset_count:
+          format: int32
+          type: integer
+        file_storage:
+          format: int64
+          type: integer
+        id:
+          format: uuid
+          type: string
+        message_count:
+          format: int32
+          type: integer
+        org_id:
+          format: uuid
+          type: string
+        user_count:
+          format: int32
+          type: integer
+      required:
+      - dataset_count
+      - file_storage
+      - id
+      - message_count
+      - org_id
+      - user_count
+      type: object
+    Range:
+      example:
+        gt: 0
+        gte: 0
+        lt: 1
+        lte: 1
+      properties:
+        gt:
+          format: double
+          nullable: true
+          type: number
+        gte:
+          format: double
+          nullable: true
+          type: number
+        lt:
+          format: double
+          nullable: true
+          type: number
+        lte:
+          format: double
+          nullable: true
+          type: number
+      type: object
+    ReccomendGroupChunksRequest:
+      example:
+        group_size: 0
+        positive_group_tracking_ids:
+        - positive_group_tracking_ids
+        - positive_group_tracking_ids
+        limit: 0
+        positive_group_ids:
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        filters: ""
+        negative_group_tracking_ids:
+        - negative_group_tracking_ids
+        - negative_group_tracking_ids
+        negative_group_ids:
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        filters:
+          allOf:
+          - $ref: '#/components/schemas/ChunkFilter'
+          nullable: true
+        group_size:
+          description: The number of chunks to fetch for each group. This is the number
+            of chunks which will be returned in the response for each group. The default
+            is 10.
+          format: int32
+          minimum: 0
+          nullable: true
+          type: integer
+        limit:
+          description: The number of groups to return. This is the number of groups
+            which will be returned in the response. The default is 10.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        negative_group_ids:
+          description: The  ids of the groups to be used as negative examples for
+            the recommendation. The groups in this array will be used to filter out
+            similar groups.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        negative_group_tracking_ids:
+          description: The  ids of the groups to be used as negative examples for
+            the recommendation. The groups in this array will be used to filter out
+            similar groups.
+          items:
+            type: string
+          nullable: true
+          type: array
+        positive_group_ids:
+          description: The  ids of the groups to be used as positive examples for
+            the recommendation. The groups in this array will be used to find similar
+            groups.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        positive_group_tracking_ids:
+          description: The  ids of the groups to be used as positive examples for
+            the recommendation. The groups in this array will be used to find similar
+            groups.
+          items:
+            type: string
+          nullable: true
+          type: array
+      type: object
+    RecommendChunksRequest:
+      example:
+        positive_tracking_ids:
+        - positive_tracking_ids
+        - positive_tracking_ids
+        limit: 0
+        positive_chunk_ids:
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        filters: ""
+        negative_tracking_ids:
+        - negative_tracking_ids
+        - negative_tracking_ids
+        negative_chunk_ids:
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        filters:
+          allOf:
+          - $ref: '#/components/schemas/ChunkFilter'
+          nullable: true
+        limit:
+          description: The number of chunks to return. This is the number of chunks
+            which will be returned in the response. The default is 10.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        negative_chunk_ids:
+          description: The ids of the chunks to be used as negative examples for the
+            recommendation. The chunks in this array will be used to filter out similar
+            chunks.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        negative_tracking_ids:
+          description: The tracking_ids of the chunks to be used as negative examples
+            for the recommendation. The chunks in this array will be used to filter
+            out similar chunks.
+          items:
+            type: string
+          nullable: true
+          type: array
+        positive_chunk_ids:
+          description: The ids of the chunks to be used as positive examples for the
+            recommendation. The chunks in this array will be used to find similar
+            chunks.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        positive_tracking_ids:
+          description: The tracking_ids of the chunks to be used as positive examples
+            for the recommendation. The chunks in this array will be used to find
+            similar chunks.
+          items:
+            type: string
+          nullable: true
+          type: array
+      type: object
+    RegenerateMessageData:
+      example:
+        highlight_citations: true
+        stream_response: true
+        model: model
+        highlight_delimiters:
+        - highlight_delimiters
+        - highlight_delimiters
+        topic_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        highlight_citations:
+          description: "Whether or not to highlight the citations in the response.\
+            \ If this is set to true or not included, the citations will be highlighted.\
+            \ If this is set to false, the citations will not be highlighted. Default\
+            \ is true."
+          nullable: true
+          type: boolean
+        highlight_delimiters:
+          description: "The delimiters to use for highlighting the citations. If this\
+            \ is not included, the default delimiters will be used. Default is `[\"\
+            .\", \"!\", \"?\", \"\\n\", \"\\t\", \",\"]`."
+          items:
+            type: string
+          nullable: true
+          type: array
+        model:
+          description: "The model to use for the assistant generative inferences.\
+            \ This can be any model from the openrouter model list. If no model is\
+            \ provided, the gpt-3.5-turbo will be used.~"
+          nullable: true
+          type: string
+        stream_response:
+          description: "Whether or not to stream the response. If this is set to true\
+            \ or not included, the response will be a stream. If this is set to false,\
+            \ the response will be a normal JSON response. Default is true."
+          nullable: true
+          type: boolean
+        topic_id:
+          description: The id of the topic to regenerate the last message for.
+          format: uuid
+          type: string
+      required:
+      - topic_id
+      type: object
+    ReturnQueuedChunk:
+      oneOf:
+      - $ref: '#/components/schemas/SingleQueuedChunkResponse'
+      - $ref: '#/components/schemas/BatchQueuedChunkResponse'
+    ScoreChunkDTO:
+      example:
+        metadata:
+        - chunk_html: <p>Some HTML content</p>
+          content: Some content
+          id: d290f1ee-6c54-4b01-90e6-d701748f0851
+          link: https://example.com
+          metadata:
+            key1: value1
+            key2: value2
+          time_stamp: 2021-01-01T00:00:00
+          weight: 0.5
+        score: 0.5
+      properties:
+        metadata:
+          items:
+            $ref: '#/components/schemas/ChunkMetadataWithFileData'
+          type: array
+        score:
+          format: double
+          type: number
+      required:
+      - metadata
+      - score
+      type: object
+    SearchChunkData:
+      example:
+        date_bias: true
+        filters:
+          must:
+          - field: metadata.key2
+            match:
+            - value3
+            - value4
+            range:
+              gt: 0
+              gte: 0
+              lt: 1
+              lte: 1
+          must_not:
+          - field: metadata.key3
+            match:
+            - value5
+            - value6
+            range:
+              gt: 0
+              gte: 0
+              lt: 1
+              lte: 1
+          should:
+          - field: metadata.key1
+            match:
+            - value1
+            - value2
+            range:
+              gt: 0
+              gte: 0
+              lt: 1
+              lte: 1
+        get_collisions: true
+        highlight_delimiters:
+        - '?'
+        - ","
+        - "."
+        - '!'
+        highlight_results: true
+        page: 1
+        page_size: 10
+        query: Some search query
+        score_threshold: 0.5
+        search_type: semantic
+        use_weights: true
+      properties:
+        date_bias:
+          description: Set date_bias to true to bias search results towards more recent
+            chunks. This will work best in hybrid search mode.
+          nullable: true
+          type: boolean
+        filters:
+          allOf:
+          - $ref: '#/components/schemas/ChunkFilter'
+          nullable: true
+        get_collisions:
+          description: Set get_collisions to true to get the collisions for each chunk.
+            This will only apply if environment variable COLLISIONS_ENABLED is set
+            to true.
+          nullable: true
+          type: boolean
+        highlight_delimiters:
+          description: "Set highlight_delimiters to a list of strings to use as delimiters\
+            \ for highlighting. If not specified, this defaults to [\"?\", \",\",\
+            \ \".\", \"!\"]."
+          items:
+            type: string
+          nullable: true
+          type: array
+        highlight_results:
+          description: "Set highlight_results to true to highlight the results. If\
+            \ not specified, this defaults to true."
+          nullable: true
+          type: boolean
+        page:
+          description: Page of chunks to fetch. Each page is 10 chunks. Support for
+            custom page size is coming soon.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        page_size:
+          description: Page size is the number of chunks to fetch. This can be used
+            to fetch more than 10 chunks at a time.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        query:
+          description: Query is the search query. This can be any string. The query
+            will be used to create an embedding vector and/or SPLADE vector which
+            will be used to find the result set.
+          type: string
+        score_threshold:
+          description: Set score_threshold to a float to filter out chunks with a
+            score below the threshold.
+          format: float
+          nullable: true
+          type: number
+        search_type:
+          description: "Can be either \"semantic\", \"fulltext\", or \"hybrid\". \"\
+            hybrid\" will pull in one page (10 chunks) of both semantic and full-text\
+            \ results then re-rank them using BAAI/bge-reranker-large. \"semantic\"\
+            \ will pull in one page (10 chunks) of the nearest cosine distant vectors.\
+            \ \"fulltext\" will pull in one page (10 chunks) of full-text results\
+            \ based on SPLADE."
+          type: string
+        use_weights:
+          description: "Set use_weights to true to use the weights of the chunks in\
+            \ the result set in order to sort them. If not specified, this defaults\
+            \ to true."
+          nullable: true
+          type: boolean
+      required:
+      - query
+      - search_type
+      type: object
+    SearchChunkQueryResponseBody:
+      example:
+        score_chunks:
+        - metadata:
+          - chunk_html: <p>Some HTML content</p>
+            content: Some content
+            id: d290f1ee-6c54-4b01-90e6-d701748f0851
+            link: https://example.com
+            metadata:
+              key1: value1
+              key2: value2
+            time_stamp: 2021-01-01T00:00:00
+            weight: 0.5
+          score: 0.5
+        - metadata:
+          - chunk_html: <p>Some HTML content</p>
+            content: Some content
+            id: d290f1ee-6c54-4b01-90e6-d701748f0851
+            link: https://example.com
+            metadata:
+              key1: value1
+              key2: value2
+            time_stamp: 2021-01-01T00:00:00
+            weight: 0.5
+          score: 0.5
+        total_chunk_pages: 0
+      properties:
+        score_chunks:
+          items:
+            $ref: '#/components/schemas/ScoreChunkDTO'
+          type: array
+        total_chunk_pages:
+          format: int64
+          type: integer
+      required:
+      - score_chunks
+      - total_chunk_pages
+      type: object
+    SearchGroupsResult:
+      example:
+        bookmarks:
+        - metadata:
+          - chunk_html: <p>Some HTML content</p>
+            content: Some content
+            id: d290f1ee-6c54-4b01-90e6-d701748f0851
+            link: https://example.com
+            metadata:
+              key1: value1
+              key2: value2
+            time_stamp: 2021-01-01T00:00:00
+            weight: 0.5
+          score: 0.5
+        - metadata:
+          - chunk_html: <p>Some HTML content</p>
+            content: Some content
+            id: d290f1ee-6c54-4b01-90e6-d701748f0851
+            link: https://example.com
+            metadata:
+              key1: value1
+              key2: value2
+            time_stamp: 2021-01-01T00:00:00
+            weight: 0.5
+          score: 0.5
+        total_pages: 0
+        group:
+          created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          tracking_id: "3"
+          updated_at: 2021-01-01T00:00:00
+      properties:
+        bookmarks:
+          items:
+            $ref: '#/components/schemas/ScoreChunkDTO'
+          type: array
+        group:
+          $ref: '#/components/schemas/ChunkGroup'
+        total_pages:
+          format: int64
+          type: integer
+      required:
+      - bookmarks
+      - group
+      - total_pages
+      type: object
+    SearchOverGroupsData:
+      example:
+        score_threshold: 5.962134
+        group_size: 0
+        query: query
+        highlight_results: true
+        get_collisions: true
+        filters: ""
+        highlight_delimiters:
+        - highlight_delimiters
+        - highlight_delimiters
+        page: 0
+        search_type: search_type
+        page_size: 0
+      properties:
+        filters:
+          allOf:
+          - $ref: '#/components/schemas/ChunkFilter'
+          nullable: true
+        get_collisions:
+          description: Set get_collisions to true to get the collisions for each chunk.
+            This will only apply if environment variable COLLISIONS_ENABLED is set
+            to true.
+          nullable: true
+          type: boolean
+        group_size:
+          format: int32
+          minimum: 0
+          nullable: true
+          type: integer
+        highlight_delimiters:
+          description: "Set highlight_delimiters to a list of strings to use as delimiters\
+            \ for highlighting. If not specified, this defaults to [\"?\", \",\",\
+            \ \".\", \"!\"]."
+          items:
+            type: string
+          nullable: true
+          type: array
+        highlight_results:
+          description: "Set highlight_results to true to highlight the results. If\
+            \ not specified, this defaults to true."
+          nullable: true
+          type: boolean
+        page:
+          description: Page of chunks to fetch. Each page is 10 chunks. Support for
+            custom page size is coming soon.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        page_size:
+          description: Page size is the number of chunks to fetch. This can be used
+            to fetch more than 10 chunks at a time.
+          format: int32
+          minimum: 0
+          nullable: true
+          type: integer
+        query:
+          description: Query is the search query. This can be any string. The query
+            will be used to create an embedding vector and/or SPLADE vector which
+            will be used to find the result set.
+          type: string
+        score_threshold:
+          description: Set score_threshold to a float to filter out chunks with a
+            score below the threshold.
+          format: float
+          nullable: true
+          type: number
+        search_type:
+          description: "Can be either \"semantic\", \"fulltext\", or \"hybrid\". \"\
+            hybrid\" will pull in one page (10 chunks) of both semantic and full-text\
+            \ results then re-rank them using BAAI/bge-reranker-large. \"semantic\"\
+            \ will pull in one page (10 chunks) of the nearest cosine distant vectors.\
+            \ \"fulltext\" will pull in one page (10 chunks) of full-text results\
+            \ based on SPLADE."
+          type: string
+      required:
+      - query
+      - search_type
+      type: object
+    SearchOverGroupsResponseBody:
+      example:
+        group_chunks:
+        - metadata:
+          - metadata:
+            - chunk_html: <p>Some HTML content</p>
+              content: Some content
+              id: d290f1ee-6c54-4b01-90e6-d701748f0851
+              link: https://example.com
+              metadata:
+                key1: value1
+                key2: value2
+              time_stamp: 2021-01-01T00:00:00
+              weight: 0.5
+            score: 0.5
+          - metadata:
+            - chunk_html: <p>Some HTML content</p>
+              content: Some content
+              id: d290f1ee-6c54-4b01-90e6-d701748f0851
+              link: https://example.com
+              metadata:
+                key1: value1
+                key2: value2
+              time_stamp: 2021-01-01T00:00:00
+              weight: 0.5
+            score: 0.5
+          group_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - metadata:
+          - metadata:
+            - chunk_html: <p>Some HTML content</p>
+              content: Some content
+              id: d290f1ee-6c54-4b01-90e6-d701748f0851
+              link: https://example.com
+              metadata:
+                key1: value1
+                key2: value2
+              time_stamp: 2021-01-01T00:00:00
+              weight: 0.5
+            score: 0.5
+          - metadata:
+            - chunk_html: <p>Some HTML content</p>
+              content: Some content
+              id: d290f1ee-6c54-4b01-90e6-d701748f0851
+              link: https://example.com
+              metadata:
+                key1: value1
+                key2: value2
+              time_stamp: 2021-01-01T00:00:00
+              weight: 0.5
+            score: 0.5
+          group_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        total_chunk_pages: 0
+      properties:
+        group_chunks:
+          items:
+            $ref: '#/components/schemas/GroupScoreChunkDTO'
+          type: array
+        total_chunk_pages:
+          format: int64
+          type: integer
+      required:
+      - group_chunks
+      - total_chunk_pages
+      type: object
+    SearchWithinGroupData:
+      example:
+        score_threshold: 1.4658129
+        group_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        query: query
+        date_bias: true
+        group_tracking_id: group_tracking_id
+        highlight_results: true
+        use_weights: true
+        filters: ""
+        highlight_delimiters:
+        - highlight_delimiters
+        - highlight_delimiters
+        page: 0
+        search_type: search_type
+        page_size: 0
+      properties:
+        date_bias:
+          description: Set date_bias to true to bias search results towards more recent
+            chunks. This will work best in hybrid search mode.
+          nullable: true
+          type: boolean
+        filters:
+          allOf:
+          - $ref: '#/components/schemas/ChunkFilter'
+          nullable: true
+        group_id:
+          description: Group specifies the group to search within. Results will only
+            consist of chunks which are bookmarks within the specified group.
+          format: uuid
+          nullable: true
+          type: string
+        group_tracking_id:
+          description: "Group_tracking_id specifies the group to search within by\
+            \ tracking id. Results will only consist of chunks which are bookmarks\
+            \ within the specified group. If both group_id and group_tracking_id are\
+            \ provided, group_id will be used."
+          nullable: true
+          type: string
+        highlight_delimiters:
+          description: "Set highlight_delimiters to a list of strings to use as delimiters\
+            \ for highlighting. If not specified, this defaults to [\"?\", \",\",\
+            \ \".\", \"!\"]."
+          items:
+            type: string
+          nullable: true
+          type: array
+        highlight_results:
+          description: "Set highlight_results to true to highlight the results. If\
+            \ not specified, this defaults to true."
+          nullable: true
+          type: boolean
+        page:
+          description: The page of chunks to fetch. Each page is 10 chunks. Support
+            for custom page size is coming soon.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        page_size:
+          description: The page size is the number of chunks to fetch. This can be
+            used to fetch more than 10 chunks at a time.
+          format: int64
+          minimum: 0
+          nullable: true
+          type: integer
+        query:
+          description: The query is the search query. This can be any string. The
+            query will be used to create an embedding vector and/or SPLADE vector
+            which will be used to find the result set.
+          type: string
+        score_threshold:
+          description: Set score_threshold to a float to filter out chunks with a
+            score below the threshold.
+          format: float
+          nullable: true
+          type: number
+        search_type:
+          description: "Search_type can be either \"semantic\", \"fulltext\", or \"\
+            hybrid\". \"hybrid\" will pull in one page (10 chunks) of both semantic\
+            \ and full-text results then re-rank them using BAAI/bge-reranker-large.\
+            \ \"semantic\" will pull in one page (10 chunks) of the nearest cosine\
+            \ distant vectors. \"fulltext\" will pull in one page (10 chunks) of full-text\
+            \ results based on SPLADE."
+          type: string
+        use_weights:
+          description: "Set use_weights to true to use the weights of the chunks in\
+            \ the result set in order to sort them. If not specified, this defaults\
+            \ to true."
+          nullable: true
+          type: boolean
+      required:
+      - query
+      - search_type
+      type: object
+    SetUserApiKeyRequest:
+      example:
+        role: 0
+        name: name
+      properties:
+        name:
+          description: The name which will be assigned to the new api key.
+          type: string
+        role:
+          description: "The role which will be assigned to the new api key. Either\
+            \ 0 (read), 1 (read and write at the level of the currently auth'ed user).\
+            \ The auth'ed user must have a role greater than or equal to the role\
+            \ being assigned which means they must be an admin (1) or owner (2) of\
+            \ the organization to assign write permissions with a role of 1."
+          format: int32
+          type: integer
+      required:
+      - name
+      - role
+      type: object
+    SetUserApiKeyResponse:
+      example:
+        api_key: api_key
+      properties:
+        api_key:
+          description: The api key which was created. This is the value which should
+            be used in the Authorization header.
+          type: string
+      required:
+      - api_key
+      type: object
+    SingleQueuedChunkResponse:
+      example:
+        chunk_metadata:
+        - chunk_vector:
+          - 0.1
+          - 0.2
+          - 0.3
+          content: Some content
+          file_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+          link: https://example.com
+          metadata:
+            key1: value1
+            key2: value2
+          tag_set:
+          - tag1
+          - tag2
+          time_stamp: 2021-01-01T00:00:00
+          tracking_id: tracking_id
+          weight: 0.5
+        pos_in_queue: 1
+      properties:
+        chunk_metadata:
+          $ref: '#/components/schemas/ChunkMetadata'
+        pos_in_queue:
+          description: The current position the last access item is in the queue
+          format: int32
+          type: integer
+      required:
+      - chunk_metadata
+      - pos_in_queue
+      type: object
+    SlimGroup:
+      example:
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        of_current_dataset: true
+      properties:
+        dataset_id:
+          format: uuid
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        of_current_dataset:
+          type: boolean
+      required:
+      - dataset_id
+      - id
+      - name
+      - of_current_dataset
+      type: object
+    SlimUser:
+      example:
+        email: developers@trieve.ai
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        orgs:
+        - created_at: 2021-01-01T00:00:00
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          name: Trieve
+          registerable: true
+          updated_at: 2021-01-01T00:00:00
+        user_orgs:
+        - created_at: 2021-01-01T00:00:00
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          org_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          role: 0
+          updated_at: 2021-01-01T00:00:00
+          user_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        username: trieve
+        visible_email: true
+        website: https://trieve.ai
+      properties:
+        email:
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          nullable: true
+          type: string
+        orgs:
+          items:
+            $ref: '#/components/schemas/Organization'
+          type: array
+        user_orgs:
+          items:
+            $ref: '#/components/schemas/UserOrganization'
+          type: array
+        username:
+          nullable: true
+          type: string
+        visible_email:
+          type: boolean
+        website:
+          nullable: true
+          type: string
+      required:
+      - email
+      - id
+      - orgs
+      - user_orgs
+      - visible_email
+      type: object
+    StripePlan:
+      example:
+        amount: 1000
+        chunk_count: 1000
+        created_at: 2021-01-01T00:00:00
+        dataset_count: 1
+        file_storage: 512
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        message_count: 1000
+        name: Free
+        stripe_id: plan_123
+        updated_at: 2021-01-01T00:00:00
+        user_count: 5
+      properties:
+        amount:
+          format: int64
+          type: integer
+        chunk_count:
+          format: int32
+          type: integer
+        created_at:
+          format: date-time
+          type: string
+        dataset_count:
+          format: int32
+          type: integer
+        file_storage:
+          format: int64
+          type: integer
+        id:
+          format: uuid
+          type: string
+        message_count:
+          format: int32
+          type: integer
+        name:
+          type: string
+        stripe_id:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        user_count:
+          format: int32
+          type: integer
+      required:
+      - amount
+      - chunk_count
+      - created_at
+      - dataset_count
+      - file_storage
+      - id
+      - message_count
+      - name
+      - stripe_id
+      - updated_at
+      - user_count
+      type: object
+    SuggestedQueriesRequest:
+      example:
+        query: query
+      properties:
+        query:
+          description: The query to base the generated suggested queries off of.
+          type: string
+      required:
+      - query
+      type: object
+    SuggestedQueriesResponse:
+      example:
+        queries:
+        - queries
+        - queries
+      properties:
+        queries:
+          items:
+            type: string
+          type: array
+      required:
+      - queries
+      type: object
+    Topic:
+      example:
+        created_at: 2021-01-01T00:00:00
+        dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        deleted: false
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        name: Trieve
+        updated_at: 2021-01-01T00:00:00
+        user_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        dataset_id:
+          format: uuid
+          type: string
+        deleted:
+          type: boolean
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+      - created_at
+      - dataset_id
+      - deleted
+      - id
+      - name
+      - updated_at
+      - user_id
+      type: object
+    UpdateChunkByTrackingIdData:
+      example:
+        chunk_html: chunk_html
+        metadata: ""
+        time_stamp: time_stamp
+        group_ids:
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        - 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        link: link
+        weight: 0.8008281904610115
+        tracking_id: tracking_id
+        group_tracking_ids:
+        - group_tracking_ids
+        - group_tracking_ids
+      properties:
+        chunk_html:
+          description: "HTML content of the chunk you want to update. This can also\
+            \ be plaintext. The innerText of the HTML will be used to create the embedding\
+            \ vector. The point of using HTML is for convienience, as some users have\
+            \ applications where users submit HTML content. If no chunk_html is provided,\
+            \ the existing chunk_html will be used."
+          nullable: true
+          type: string
+        group_ids:
+          description: Group ids are the ids of the groups that the chunk should be
+            placed into. This is useful for when you want to update a chunk and add
+            it to a group or multiple groups in one request.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        group_tracking_ids:
+          description: Group tracking_ids are the tracking_ids of the groups that
+            the chunk should be placed into. This is useful for when you want to update
+            a chunk and add it to a group or multiple groups in one request.
+          items:
+            type: string
+          nullable: true
+          type: array
+        link:
+          description: "Link of the chunk you want to update. This can also be any\
+            \ string. Frequently, this is a link to the source of the chunk. The link\
+            \ value will not affect the embedding creation. If no link is provided,\
+            \ the existing link will be used."
+          nullable: true
+          type: string
+        metadata:
+          description: "The metadata is a JSON object which can be used to filter\
+            \ chunks. This is useful for when you want to filter chunks by arbitrary\
+            \ metadata. Unlike with tag filtering, there is a performance hit for\
+            \ filtering on metadata. If no metadata is provided, the existing metadata\
+            \ will be used."
+          nullable: true
+        time_stamp:
+          description: "Time_stamp should be an ISO 8601 combined date and time without\
+            \ timezone. It is used for time window filtering and recency-biasing search\
+            \ results. If no time_stamp is provided, the existing time_stamp will\
+            \ be used."
+          nullable: true
+          type: string
+        tracking_id:
+          description: Tracking_id of the chunk you want to update. This is required
+            to match an existing chunk.
+          type: string
+        weight:
+          description: "Weight is a float which can be used to bias search results.\
+            \ This is useful for when you want to bias search results for a chunk.\
+            \ The magnitude only matters relative to other chunks in the chunk's dataset\
+            \ dataset. If no weight is provided, the existing weight will be used."
+          format: double
+          nullable: true
+          type: number
+      required:
+      - tracking_id
+      type: object
+    UpdateChunkData:
+      example:
+        chunk_html: <p>Some HTML content</p>
+        chunk_id: d290f1ee-6c54-4b01-90e6-d701748f0851
+        group_ids:
+        - d290f1ee-6c54-4b01-90e6-d701748f0851
+        link: https://example.com
+        metadata:
+          key1: value1
+          key2: value2
+        time_stamp: 2021-01-01T00:00:00
+        weight: 0.5
+      properties:
+        chunk_html:
+          description: "HTML content of the chunk you want to update. This can also\
+            \ be plaintext. The innerText of the HTML will be used to create the embedding\
+            \ vector. The point of using HTML is for convienience, as some users have\
+            \ applications where users submit HTML content. If no chunk_html is provided,\
+            \ the existing chunk_html will be used."
+          nullable: true
+          type: string
+        chunk_id:
+          description: "Id of the chunk you want to update. You can provide either\
+            \ the chunk_id or the tracking_id. If both are provided, the chunk_id\
+            \ will be used."
+          format: uuid
+          nullable: true
+          type: string
+        group_ids:
+          description: Group ids are the ids of the groups that the chunk should be
+            placed into. This is useful for when you want to update a chunk and add
+            it to a group or multiple groups in one request.
+          items:
+            format: uuid
+            type: string
+          nullable: true
+          type: array
+        group_tracking_ids:
+          description: Group tracking_ids are the tracking_ids of the groups that
+            the chunk should be placed into. This is useful for when you want to update
+            a chunk and add it to a group or multiple groups in one request.
+          items:
+            type: string
+          nullable: true
+          type: array
+        link:
+          description: "Link of the chunk you want to update. This can also be any\
+            \ string. Frequently, this is a link to the source of the chunk. The link\
+            \ value will not affect the embedding creation. If no link is provided,\
+            \ the existing link will be used."
+          nullable: true
+          type: string
+        metadata:
+          description: "The metadata is a JSON object which can be used to filter\
+            \ chunks. This is useful for when you want to filter chunks by arbitrary\
+            \ metadata. Unlike with tag filtering, there is a performance hit for\
+            \ filtering on metadata. If no metadata is provided, the existing metadata\
+            \ will be used."
+          nullable: true
+        time_stamp:
+          description: "Time_stamp should be an ISO 8601 combined date and time without\
+            \ timezone. It is used for time window filtering and recency-biasing search\
+            \ results. If no time_stamp is provided, the existing time_stamp will\
+            \ be used."
+          nullable: true
+          type: string
+        tracking_id:
+          description: Tracking_id of the chunk you want to update. This is required
+            to match an existing chunk.
+          nullable: true
+          type: string
+        weight:
+          description: "Weight is a float which can be used to bias search results.\
+            \ This is useful for when you want to bias search results for a chunk.\
+            \ The magnitude only matters relative to other chunks in the chunk's dataset\
+            \ dataset. If no weight is provided, the existing weight will be used."
+          format: double
+          nullable: true
+          type: number
+      type: object
+    UpdateChunkGroupData:
+      example:
+        group_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        name: name
+        description: description
+        tracking_id: tracking_id
+      properties:
+        description:
+          description: "Description to assign to the chunk_group. Convenience field\
+            \ for you to avoid having to remember what the group is for. If not provided,\
+            \ the description will not be updated."
+          nullable: true
+          type: string
+        group_id:
+          description: Id of the chunk_group to update.
+          format: uuid
+          nullable: true
+          type: string
+        name:
+          description: "Name to assign to the chunk_group. Does not need to be unique.\
+            \ If not provided, the name will not be updated."
+          nullable: true
+          type: string
+        tracking_id:
+          description: Tracking Id of the chunk_group to update.
+          nullable: true
+          type: string
+      type: object
+    UpdateDatasetRequest:
+      example:
+        client_configuration: {}
+        dataset_id: 00000000-0000-0000-0000-000000000000
+        dataset_name: My Dataset
+        server_configuration: {}
+      properties:
+        client_configuration:
+          description: "The new client configuration of the dataset, can be arbitrary\
+            \ JSON. See docs.trieve.ai for more information. If not provided, the\
+            \ client configuration will not be updated."
+          nullable: true
+        dataset_id:
+          description: The id of the dataset you want to update.
+          format: uuid
+          type: string
+        dataset_name:
+          description: "The new name of the dataset. Must be unique within the organization.\
+            \ If not provided, the name will not be updated."
+          nullable: true
+          type: string
+        server_configuration:
+          description: "The new server configuration of the dataset, can be arbitrary\
+            \ JSON. See docs.trieve.ai for more information. If not provided, the\
+            \ server configuration will not be updated."
+          nullable: true
+      required:
+      - dataset_id
+      type: object
+    UpdateGroupByTrackingIDData:
+      example:
+        name: name
+        description: description
+        tracking_id: tracking_id
+      properties:
+        description:
+          description: "Description to assign to the chunk_group. Convenience field\
+            \ for you to avoid having to remember what the group is for. If not provided,\
+            \ the description will not be updated."
+          nullable: true
+          type: string
+        name:
+          description: "Name to assign to the chunk_group. Does not need to be unique.\
+            \ If not provided, the name will not be updated."
+          nullable: true
+          type: string
+        tracking_id:
+          description: Tracking Id of the chunk_group to update.
+          type: string
+      required:
+      - tracking_id
+      type: object
+    UpdateOrganizationData:
+      example:
+        organization_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        name: name
+      properties:
+        name:
+          description: "The new name of the organization. If not provided, the name\
+            \ will not be updated."
+          nullable: true
+          type: string
+        organization_id:
+          description: The id of the organization to update.
+          format: uuid
+          type: string
+      required:
+      - organization_id
+      type: object
+    UpdateTopicData:
+      example:
+        name: name
+        topic_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+      properties:
+        name:
+          description: "The new name of the topic. A name is not generated from this\
+            \ field, it is used as-is."
+          type: string
+        topic_id:
+          description: The id of the topic to target.
+          format: uuid
+          type: string
+      required:
+      - name
+      - topic_id
+      type: object
+    UpdateUserData:
+      example:
+        website: website
+        role: 0
+        user_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        organization_id: 046b6c7f-0b8a-43b9-b35d-6489e6daee91
+        name: name
+        visible_email: true
+        username: username
+      properties:
+        name:
+          description: "In the sense of a legal name, not a username. The new name\
+            \ to assign to the user, if not provided, the current name will be used."
+          nullable: true
+          type: string
+        organization_id:
+          description: The id of the organization to update the user for.
+          format: uuid
+          type: string
+        role:
+          description: "Either 0 (user), 1 (admin), or 2 (owner). If not provided,\
+            \ the current role will be used. The auth'ed user must have a role greater\
+            \ than or equal to the role being assigned."
+          format: int32
+          nullable: true
+          type: integer
+        user_id:
+          description: "The id of the user to update, if not provided, the auth'ed\
+            \ user will be updated. If provided, the auth'ed user must be an admin\
+            \ (1) or owner (2) of the organization."
+          format: uuid
+          nullable: true
+          type: string
+        username:
+          description: "The new username to assign to the user, if not provided, the\
+            \ current username will be used."
+          nullable: true
+          type: string
+        visible_email:
+          description: "Determines if the user's email is visible to other users,\
+            \ if not provided, the current value will be used."
+          nullable: true
+          type: boolean
+        website:
+          description: "The new website to assign to the user, if not provided, the\
+            \ current website will be used. Used for linking to the user's personal\
+            \ or company website."
+          nullable: true
+          type: string
+      required:
+      - organization_id
+      type: object
+    UploadFileData:
+      example:
+        base64_file: base64_encoded_file
+        create_chunks: true
+        description: This is an example file
+        file_mime_type: application/pdf
+        file_name: example.pdf
+        link: https://example.com
+        metadata:
+          key1: value1
+          key2: value2
+        tag_set:
+        - tag1
+        - tag2
+        time_stamp: 2021-01-01T00:00:00Z
+      properties:
+        base64_file:
+          description: "Base64 encoded file. Convert + to -, / to _, and remove the\
+            \ ending = if present. This is the standard base64url encoding."
+          type: string
+        create_chunks:
+          description: "Create chunks is a boolean which determines whether or not\
+            \ to create chunks from the file. If false, you can manually chunk the\
+            \ file and send the chunks to the create_chunk endpoint with the file_id\
+            \ to associate chunks with the file. Meant mostly for advanced users."
+          nullable: true
+          type: boolean
+        description:
+          description: Description is an optional convience field so you do not have
+            to remember what the file contains or is about. It will be included on
+            the group resulting from the file which will hold its chunk.
+          nullable: true
+          type: string
+        file_mime_type:
+          description: MIME type of the file being uploaded.
+          type: string
+        file_name:
+          description: "Name of the file being uploaded, including the extension."
+          type: string
+        link:
+          description: Link to the file. This can also be any string. This can be
+            used to filter when searching for the file's resulting chunks. The link
+            value will not affect embedding creation.
+          nullable: true
+          type: string
+        metadata:
+          description: "Metadata is a JSON object which can be used to filter chunks.\
+            \ This is useful for when you want to filter chunks by arbitrary metadata.\
+            \ Unlike with tag filtering, there is a performance hit for filtering\
+            \ on metadata. Will be passed down to the file's chunks."
+          nullable: true
+        tag_set:
+          description: Tag set is a comma separated list of tags which will be passed
+            down to the chunks made from the file. Tags are used to filter chunks
+            when searching. HNSW indices are created for each tag such that there
+            is no performance loss when filtering on them.
+          items:
+            type: string
+          nullable: true
+          type: array
+        time_stamp:
+          description: Time stamp should be an ISO 8601 combined date and time without
+            timezone. Time_stamp is used for time window filtering and recency-biasing
+            search results. Will be passed down to the file's chunks.
+          nullable: true
+          type: string
+      required:
+      - base64_file
+      - file_mime_type
+      - file_name
+      type: object
+    UploadFileResult:
+      example:
+        file_metadata:
+          created_at: 2021-01-01T00:00:00
+          dataset_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          file_name: file.txt
+          id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+          link: https://trieve.ai
+          metadata:
+            key: value
+          size: 1000
+          tag_set: "tag1,tag2"
+          time_stamp: 2021-01-01T00:00:00
+          updated_at: 2021-01-01T00:00:00
+      properties:
+        file_metadata:
+          $ref: '#/components/schemas/File'
+      required:
+      - file_metadata
+      type: object
+    UserOrganization:
+      example:
+        created_at: 2021-01-01T00:00:00
+        id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        organization_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+        role: 2
+        updated_at: 2021-01-01T00:00:00
+        user_id: e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        organization_id:
+          format: uuid
+          type: string
+        role:
+          format: int32
+          type: integer
+        updated_at:
+          format: date-time
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+      - created_at
+      - id
+      - organization_id
+      - role
+      - updated_at
+      - user_id
+      type: object
+  securitySchemes:
+    ApiKey:
+      in: header
+      name: Authorization
+      type: apiKey
+

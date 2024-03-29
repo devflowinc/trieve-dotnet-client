@@ -1,0 +1,18 @@
+generatorName: csharp-netcore
+outputDir: ./generated-code/csharp-client
+packageName: trieve_dotnet_client
+packageVersion: 0.5.0
+
+additionalProperties:
+  projectName: trieve_dotnet_client
+  packageTitle: "Trieve C# Client"
+  packageUrl: "https://trieve.ai"
+  packageLicense: "MIT"
+  packageDescription: "C# client for Trieve API generated from its OpenAPI specification using openapi-generator."
+  packageCompany: "Trieve"
+  packageAuthor: "Trieve"
+  packageAuthorEmail: "developers@trieve.ai"
+  packageVersion: "0.5.0"
+  targetFramework: net8.0
+  repositoryUrl: "https://github.com/devflowinc/trieve-dotnet-client"
+
