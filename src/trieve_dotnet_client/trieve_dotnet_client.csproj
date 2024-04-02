@@ -3,21 +3,24 @@
   <PropertyGroup>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo><!-- setting GenerateAssemblyInfo to false causes this bug https://github.com/dotnet/project-system/issues/3934 -->
     <TargetFramework>net8.0</TargetFramework>
-    <AssemblyName>trieve_dotnet_client</AssemblyName>
-    <PackageId>trieve_dotnet_client</PackageId>
+    <AssemblyName>trieve-dotnet-client</AssemblyName>
+    <PackageId>trieve-dotnet-client</PackageId>
     <OutputType>Library</OutputType>
-    <Authors>OpenAPI</Authors>
-    <Company>Trieve</Company>
+    <Authors>Devflow, Inc</Authors>
+    <Company>Devflow, Inc</Company>
     <AssemblyTitle>Trieve C# Client</AssemblyTitle>
-    <Description>C# client for Trieve API generated from its OpenAPI specification using openapi-generator.</Description>
+    <Description>C# client for Trieve API generated from its OpenAPI specification.</Description>
     <Copyright>No Copyright</Copyright>
     <RootNamespace>trieve_dotnet_client</RootNamespace>
-    <Version>0.5.0</Version>
+    <Version>0.5.4</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\trieve_dotnet_client.xml</DocumentationFile>
-    <RepositoryUrl>https://github.com/GIT_USER_ID/GIT_REPO_ID.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/devflowinc/trieve-dotnet-client</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReleaseNotes>Minor update</PackageReleaseNotes>
     <Nullable>annotations</Nullable>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>Trieve, Semantic-Search, API, openapi-client, openapi-generator, @devflowinc/trieve-dotnet-client</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,5 +35,8 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Web" />
+  </ItemGroup>
+  <ItemGroup>
+        <None Include="./bin/Release/README.md" Pack="true" PackagePath="\"/>
   </ItemGroup>
 </Project>
